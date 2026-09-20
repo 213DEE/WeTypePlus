@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Double-headed arrow: "stretch the keyboard". -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M26,44 L39,36 L39,41 L69,41 L69,36 L82,44 L69,52 L69,47 L39,47 L39,52 Z" />
+
+    <!-- Keyboard body. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M31,62 L77,62 A6,6 0 0 1 83,68 L83,72 A6,6 0 0 1 77,78 L31,78 A6,6 0 0 1 25,72 L25,68 A6,6 0 0 1 31,62 Z" />
+
+    <!-- Key separations, painted in the background colour so they read as cut-outs. -->
+    <path
+        android:fillColor="#0E8A64"
+        android:pathData="M34,64 h3 v12 h-3 z M45,64 h3 v12 h-3 z M56,64 h3 v12 h-3 z M67,64 h3 v12 h-3 z" />
+</vector>

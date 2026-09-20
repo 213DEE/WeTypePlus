@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The activity is a pure Compose surface, so it only needs a chrome-less host window.
+      Colours come from MiuixTheme, not from this style, which is why it stays this small.
+    -->
+    <style name="Theme.WeTypePlus" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Used by the "restart WeType" action; a normal permission, no runtime prompt. -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+
+    <!-- Android 11+ package visibility: the restart action needs WeType's launch intent. -->
+    <queries>
+        <package android:name="com.tencent.wetype" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:description="@string/xposed_description"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.WeTypePlus">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Carries the settings across the process boundary. The keyboard hooks run inside
+          WeType's process and cannot read this app's private preferences directly, so they
+          read them through this provider instead. It exposes four booleans and nothing else.
+        -->
+        <provider
+            android:name=".bridge.SettingsProvider"
+            android:authorities="cn.dsr213.wetypeplus.settings"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+    </application>
+</manifest>

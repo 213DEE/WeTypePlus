@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">微信输入法增强</string>
+    <string name="xposed_description">解除微信输入法在大屏（折叠屏展开 / 横屏）下的限制：键盘宽度上限、单手模式门控、左右留白联动。</string>
+
+    <!-- 通用 -->
+    <string name="action_restart_wetype">重启微信输入法</string>
+    <string name="action_restart_wetype_desc">强制结束并重新启动微信输入法，让 Hook 重新加载。</string>
+    <string name="action_restart_done">已重启微信输入法</string>
+    <string name="action_restart_failed">重启失败，请手动打开微信输入法</string>
+    <string name="action_restart_running">正在重启…</string>
+    <string name="section_keyboard">键盘</string>
+    <string name="section_actions">操作</string>
+    <string name="section_support">支持作者</string>
+    <string name="section_about">关于</string>
+    <string name="restart_dialog_title">现在重启微信输入法？</string>
+    <string name="restart_dialog_message">会强制结束 com.tencent.wetype，正在输入的内容可能丢失。</string>
+    <string name="restart_dialog_confirm">重启</string>
+    <string name="dialog_cancel">取消</string>
+
+    <!-- 键盘开关 -->
+    <string name="settings_unlock_width_title">解除键盘宽度上限</string>
+    <string name="settings_unlock_width_desc">抬高展开屏 / 横屏下的宽度上限。键盘自带的尺寸调节滑块仍然可以正常拉伸。</string>
+    <string name="settings_single_hand_title">强开单手模式</string>
+    <string name="settings_single_hand_desc">微信输入法在展开屏上会禁用单手模式。开启后强制生效，但请注意这套布局是按手机宽度设计的。</string>
+    <string name="settings_sync_padding_title">左右留白联动</string>
+    <string name="settings_sync_padding_desc">拖动一侧留白时，另一侧自动跟同，让键盘保持居中。</string>
+    <string name="settings_exclusive_title">单手 / 分体互斥</string>
+    <string name="settings_exclusive_desc">开启其中一个时，自动关闭另一个。</string>
+
+    <!-- 支持作者 -->
+    <string name="support_title">支持作者</string>
+    <string name="support_desc">请作者喝杯咖啡</string>
+    <string name="support_intro">本模块免费，并且会一直免费。所有功能默认就是开的，下面的收款码只是纯粹的打赏，不解锁任何东西。</string>
+    <string name="support_qr_hint">微信 · 点一下看大图</string>
+    <string name="support_disclaimer">打赏完全自愿，不会带来额外功能、优先支持或任何授权。不打赏也照常好用。</string>
+    <string name="support_qr_cd">微信打赏收款码</string>
+
+    <!-- 关于 -->
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_independent">独立实现，不含任何第三方项目源码。</string>
+</resources>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WeType Plus</string>
+    <string name="xposed_description">Removes WeType\'s large-screen limits: keyboard width cap, single-hand mode gate, mirrored side margins.</string>
+
+    <!-- Generic -->
+    <string name="action_restart_wetype">Restart WeType</string>
+    <string name="action_restart_wetype_desc">Force-stop and relaunch WeType so the hooks reload.</string>
+    <string name="action_restart_done">WeType restarted</string>
+    <string name="action_restart_failed">Could not restart WeType</string>
+    <string name="action_restart_running">Restarting…</string>
+    <string name="section_keyboard">Keyboard</string>
+    <string name="section_actions">Actions</string>
+    <string name="section_support">Support</string>
+    <string name="section_about">About</string>
+    <string name="restart_dialog_title">Restart WeType now?</string>
+    <string name="restart_dialog_message">This force-stops com.tencent.wetype. Any text you were typing may be lost.</string>
+    <string name="restart_dialog_confirm">Restart</string>
+    <string name="dialog_cancel">Cancel</string>
+
+    <!-- Keyboard switches -->
+    <string name="settings_unlock_width_title">Unlock keyboard width</string>
+    <string name="settings_unlock_width_desc">Raises the width ceiling on unfolded / landscape screens. The built-in size adjuster keeps its full travel.</string>
+    <string name="settings_single_hand_title">Unlock single-hand mode</string>
+    <string name="settings_single_hand_desc">WeType disables single-hand mode on large screens. Turn this on to force it, knowing the layout is designed for phone widths.</string>
+    <string name="settings_sync_padding_title">Mirror side margins</string>
+    <string name="settings_sync_padding_desc">Dragging one side margin drags the other with it, keeping the keyboard centred.</string>
+    <string name="settings_exclusive_title">Single-hand / split are exclusive</string>
+    <string name="settings_exclusive_desc">Turning on one of them turns the other off.</string>
+
+    <!-- Support -->
+    <string name="support_title">Support the author</string>
+    <string name="support_desc">Buy me a coffee</string>
+    <string name="support_intro">This module is free and stays free. Every feature is unlocked by default — the code below is purely a tip jar and unlocks nothing.</string>
+    <string name="support_qr_hint">WeChat · tap to enlarge</string>
+    <string name="support_disclaimer">Donations are voluntary and give no extra features, no priority support and no licence. Thanks either way.</string>
+    <string name="support_qr_cd">WeChat tip QR code</string>
+
+    <!-- About -->
+    <string name="about_version">Version %1$s</string>
+    <string name="about_independent">Independent implementation. Contains no third-party source code.</string>
+</resources>
