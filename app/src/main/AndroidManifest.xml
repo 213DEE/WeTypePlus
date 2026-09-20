@@ -32,7 +32,7 @@
         <!--
           Carries the settings across the process boundary. The keyboard hooks run inside
           WeType's process and cannot read this app's private preferences directly, so they
-          read them through this provider instead. It exposes four booleans and nothing else.
+          read them through this provider instead. It exposes two booleans and nothing else.
         -->
         <provider
             android:name=".bridge.SettingsProvider"

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">WeType Plus</string>
-    <string name="xposed_description">Removes WeType\'s large-screen limits: keyboard width cap, single-hand mode gate, mirrored side margins.</string>
+    <string name="xposed_description">Removes WeType\'s large-screen limits: keyboard width cap, single-hand mode gate, and a size-adjust panel that stays centred.</string>
 
     <!-- Generic -->
     <string name="action_restart_wetype">Restart WeType</string>
@@ -23,10 +23,6 @@
     <string name="settings_unlock_width_desc">Raises the width ceiling on unfolded / landscape screens. The built-in size adjuster keeps its full travel.</string>
     <string name="settings_single_hand_title">Unlock single-hand mode</string>
     <string name="settings_single_hand_desc">WeType disables single-hand mode on large screens. Turn this on to force it, knowing the layout is designed for phone widths.</string>
-    <string name="settings_sync_padding_title">Mirror side margins</string>
-    <string name="settings_sync_padding_desc">Dragging one side margin drags the other with it, keeping the keyboard centred.</string>
-    <string name="settings_exclusive_title">Single-hand / split are exclusive</string>
-    <string name="settings_exclusive_desc">Turning on one of them turns the other off.</string>
 
     <!-- Support -->
     <string name="support_title">Support the author</string>
@@ -38,5 +34,8 @@
 
     <!-- About -->
     <string name="about_version">Version %1$s</string>
-    <string name="about_independent">Independent implementation. Contains no third-party source code.</string>
+    <string name="about_github_title">GitHub</string>
+    <string name="about_github_summary">Project homepage, source and releases.</string>
+    <string name="about_github_url" translatable="false">https://github.com/213DEE/WeTypePlus</string>
+    <string name="about_link_failed">No app on this device can open the link</string>
 </resources>

@@ -1,76 +1,71 @@
-# WeType Plus
+# WeType Plus · 微信输入法增强
 
 给**微信输入法**在大屏设备（折叠屏展开、横屏平板）上补回它自己关掉的键盘布局能力。
 
-一个 LSPosed 模块，**独立实现**，不含任何第三方项目源码。
+**LSPosed 模块** · 不改宿主 APK · 不碰签名 · 只 hook 方法
+
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Android%2012%2B-green.svg)](#测试环境)
+[![Framework](https://img.shields.io/badge/framework-LSPosed%20(libxposed%20API%20102)-orange.svg)](#测试环境)
+
+[中文](#中文) · [English](#english)
 
 ---
 
-## 它解决什么
+## 中文
 
-微信输入法按"手机竖屏宽度"设计，到了展开屏 / 横屏上就变成中间一根窄柱子，两侧一大片留白。这不是 bug，是宿主主动加的限制。本模块把限制的**上限**抬高，不写死任何尺寸。
+### 它解决什么
 
-| 开关 | 作用 | 默认 |
-|---|---|---|
-| **解除键盘宽度上限** | 抬高展开屏 / 横屏下的宽度上限。键盘自带的尺寸调节滑块**仍然可用**，100% 现在等于整屏宽，而不是一根手机宽的柱子 | 开 |
-| **强开单手模式** | 宿主在展开屏上直接禁用了单手模式（判断链里写死了「非展开屏」）。开启后强制生效 | 开 |
-| **左右留白联动** | 拖动一侧留白时，另一侧自动跟同，键盘保持居中 | 开 |
-| **单手 / 分体互斥** | 开一个自动关另一个 | 开 |
+微信输入法按「手机竖屏宽度」设计。到了展开屏 / 横屏上，键盘就变成中间一根窄柱子，两侧一大片留白。这不是 bug，是宿主主动加的限制——宽度链路里所有的尺寸都要乘同一个缩放系数，那个系数的分子取的是手机短边。
 
-全部默认开启。关掉任意一项，对应行为立刻恢复成宿主默认，不需要重启输入法。
+本模块抬高这个**上限**，不写死任何尺寸。所以键盘自带的「尺寸调节」滑块**仍然可用**，而且 100% 现在等于整屏宽，而不是一根手机宽的柱子。
+
+### 功能
+
+**两个开关**（设置页里可关，默认都开）：
+
+| 开关 | 作用 |
+|---|---|
+| **解除键盘宽度上限** | 抬高展开屏 / 横屏下的宽度上限。调节滑块的全部行程保留 |
+| **强开单手模式** | 宿主在展开屏上直接禁用了单手模式（判断链里写死了「非展开屏」）。开启后强制生效 |
+
+**默认生效，没有开关**：
+
+- **左右留白联动居中**——在「键盘调节」里拖动任意一侧，另一侧朝反方向走同样距离。键盘输入区域的中轴线始终和整屏中轴线重合。
+- **调节遮罩与输入区域重合**——调节时那层深色半透明遮罩，边界始终等于键盘输入区域的边界（宿主的预览路径少算了一侧增量，本模块补上）。
+- **单手 / 分体互斥**——开一个自动关另一个。
+- **单手模式下按钮贴对侧**——键盘靠左，重置/取消/确定 就贴右；靠右就贴左。
 
 > ⚠️ **强开单手模式的代价**：宿主的单手布局（辅助键位置、字号、最大宽度约束）都是按手机宽度设计的。在展开屏上强行打开，**布局会走形、字号会变小**。这是宿主的设计前提决定的，不是本模块能修的。如果你不接受，把它关掉即可。
 
----
+### 测试环境
 
-## 它是怎么做的
+本项目在下列环境完成实机验证：
 
-**只 hook 方法，不改宿主 APK，不碰签名。**
+| 项 | 值 |
+|---|---|
+| 设备 | Xiaomi 18 Fold（产品代号 `lhasa` / 型号 `2608BPX34C`） |
+| 屏幕 | 内屏 1672 × 2364（展开横屏 2364 × 1672）；外屏 1168 × 1712 |
+| 宿主 | 微信输入法 `com.tencent.wetype` **3.5.3.56201** |
+| 框架 | LSPosed（libxposed API **102**） |
+| 模块构建 | JDK 21 · Gradle 9.6.0 · Kotlin 2.0 · compileSdk 37 / minSdk 31 / targetSdk 37 |
 
-- **不写死尺寸**。宽度链路里所有尺寸都乘同一个缩放系数，本模块改的是这个系数，所以整个链路的**上限**一起抬高，而调节滑块的全部行程保留。
-- **不读宿主静态字段**。解析宿主类一律用 `Class.forName(name, false, …)`（不触发 `<clinit>`）。宿主的静态初始化依赖已 attach 的 `Application`，在安装 hook 阶段触发它会**让输入法进程启动即崩溃**。
-- **失败即降级**。每个 hook 入口都 fail-closed：宿主将来改名或改结构，对应功能变成"未生效"，不会把输入法搞崩。
+宿主的布局逻辑跑在独立的 `:hld` 进程里，装完模块**必须重启一次微信输入法**，否则那个进程里没有模块。
 
-### 两个进程，一条正规通道
+其他机型 / 系统版本未验证。宿主换版后若内部方法改名，对应功能会静默失效（不会崩），见[失败即降级](#它是怎么做的)。
 
-模块需要把开关送到 **微信输入法进程**里运行的 hook。跨进程读私有目录是行不通的（uid 不同），所以要有一条通道。本项目用的是一个**导出的 `ContentProvider`**：
+### 安装
 
-```
-[设置 App 进程]                        [微信输入法进程]
-  MainActivity                           WeTypeLayoutHooks
-      │ 写                                   │ 读（1 秒缓存）
-      ▼                                      ▼
-  SharedPreferences  ──►  SettingsProvider  ──►  content://cn.dsr213.wetypeplus.settings
-```
+1. 设备需已 root 并装有 LSPosed。
+2. 安装 APK。
+3. 在 **LSPosed** 里启用本模块。
+4. **作用域勾选「微信输入法」**（`com.tencent.wetype`），其他不用勾。
+5. 强制结束微信输入法一次，让它重新加载（设置页里有「重启微信输入法」按钮）。
+6. 打开模块的设置页按需开关。
 
-于是设置界面是一个**普通 App 的普通 Activity**，不需要把 UI 注入宿主、不需要 root、不需要共享文件。通道表面只有一个 `query`，返回一行四个 0/1。
+> 如果你之前装过 `com.xposed.wetypehook` 这个旧模块，**请先把它关掉**——两个模块 hook 同一批方法，同时开启会重复 hook。
 
----
-
-## 目录结构
-
-```
-app/src/main/java/cn/dsr213/wetypeplus/
-├── ModuleEntry.kt              libxposed 入口（java_init.list 里注册的就是它）
-├── KeyboardSettings.kt         四个开关的数据模型（App / Provider / Hook 三方共用）
-├── AppSettings.kt              本 App 自己的持久化
-├── bridge/
-│   ├── Bridge.kt               全项目唯一接触 libxposed 的文件
-│   ├── SettingsProvider.kt     跨进程通道
-│   └── ...
-├── hook/
-│   ├── WeTypeLayoutHooks.kt    真正干活的 hook（宿主逆向的成果都在这）
-│   └── HookSettings.kt         hook 侧只读缓存
-└── ui/
-    ├── MainActivity.kt
-    ├── SettingsScreen.kt       Miuix 设置页
-    ├── SupportScreen.kt        打赏页
-    └── HostRestart.kt
-```
-
----
-
-## 构建
+### 构建
 
 需要 JDK 21 + Android SDK（compileSdk 37）。
 
@@ -79,52 +74,194 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 ./gradlew :app:assembleRelease
 ```
 
-产物：`app/build/outputs/apk/release/WeTypePlus-<version>_release.apk`
-
-未签名。自己签一下：
+产物：`app/build/outputs/apk/release/WeTypePlus-<version>_release.apk`（未签名）
 
 ```bash
-zipalign -f -p 4 WeTypePlus-1.0.0_release.apk aligned.apk
-apksigner sign --ks your.jks --out WeTypePlus-1.0.0-signed.apk aligned.apk
+zipalign -f -p 4 WeTypePlus-<version>_release.apk aligned.apk
+apksigner sign --ks your.jks --out WeTypePlus-<version>-signed.apk aligned.apk
 ```
 
-## 安装
+### 它是怎么做的
 
-1. 装上 APK。
-2. 在 **LSPosed** 里启用本模块。
-3. **作用域勾选「微信输入法」**（`com.tencent.wetype`），其他不用勾。
-4. 强制结束微信输入法一次，让它重新加载（设置页里有「重启微信输入法」按钮）。
-5. 在设置页里按需开关。
+**只 hook 方法，不改宿主 APK，不重打包，不碰签名。**
 
-日志标签：`WeTypePlus`
+- **不写死尺寸。** 宽度链路里所有尺寸都乘同一个缩放系数，本模块改的是这个系数，所以整条链路的**上限**一起抬高，而调节滑块的全部行程保留。
+- **不读宿主静态字段。** 解析宿主类一律用 `Class.forName(name, false, …)`（不触发 `<clinit>`）。宿主的静态初始化依赖已 attach 的 `Application`，在安装 hook 的阶段触发它会**让输入法进程启动即崩溃**。hook **方法**本身是安全的。
+- **失败即降级。** 每个 hook 入口都是 fail-closed：宿主将来改名或改结构，对应功能变成「未生效」，不会把输入法搞崩。
 
----
+**两个进程，一条正规通道。** 模块需要把开关送进微信输入法进程里运行的 hook。跨进程读私有目录行不通（uid 不同），所以本项目用的是一个**导出的 `ContentProvider`**：
 
-## 支持作者
+```
+[模块 App 进程]                          [微信输入法进程]
+  MainActivity                             WeTypeLayoutHooks
+      │ 写                                     │ 读（1 秒缓存）
+      ▼                                        ▼
+  SharedPreferences  ──►  SettingsProvider  ──►  content://cn.dsr213.wetypeplus.settings
+```
+
+于是设置界面是一个**普通 App 的普通 Activity**——不需要把 UI 注入宿主、不需要共享文件。通道表面只有一个 `query`，返回一行两个 0/1。
+
+### 目录结构
+
+```
+app/src/main/
+├── java/cn/dsr213/wetypeplus/
+│   ├── ModuleEntry.kt            libxposed 入口（java_init.list 里注册的就是它）
+│   ├── KeyboardSettings.kt       开关的数据模型（App / Provider / Hook 三方共用）
+│   ├── AppSettings.kt            本 App 自己的持久化
+│   ├── bridge/
+│   │   ├── Bridge.kt             全项目唯一接触 libxposed 的文件
+│   │   └── SettingsProvider.kt   跨进程通道
+│   ├── hook/
+│   │   ├── WeTypeLayoutHooks.kt  真正干活的 hook（宿主逆向的成果都在这）
+│   │   └── HookSettings.kt       hook 侧只读缓存
+│   └── ui/
+│       ├── MainActivity.kt
+│       ├── SettingsScreen.kt     Miuix 设置页
+│       ├── SupportScreen.kt      打赏页
+│       └── HostRestart.kt
+└── resources/META-INF/xposed/    module.prop / scope.list / java_init.list
+```
+
+### 日志
+
+模块的日志标签是 **`WeTypePlus`**。排查时看 LSPosed 日志里有没有这几类行：
+
+```
+Success: ...          hook 装上了
+Adjust b: left,right=218,836 -> 527,527   留白联动（左+右）/2
+Panel preview host:  ...                  调节遮罩改写前后
+Failed: ...           某个 hook 没装上（不影响其他功能）
+```
+
+### 常见问题
+
+**装完没反应？** 微信输入法的键盘逻辑跑在 `:hld` 进程里，这个进程往往在装模块之前就起来了。**强制结束一次微信输入法**再来。
+
+**调节完之后又弹回去了？** 那是宿主在面板重建时用「展开态留白」覆盖了你的值。本模块把那个分支旁路了，如果还出现，看日志里的 `Padding write:` 行。
+
+**键盘在横屏下还是只占 71%？** 宿主的缩放系数在横屏下拿屏幕**短边**当分子，所以横竖屏键盘宽度基本一致。这是上游设计，本模块的「解除宽度上限」抬高的是上限，不改变这个基准。
+
+### 支持作者
 
 **本模块免费，并且会一直免费。所有功能默认就是开的，不存在解锁一说。**
 
-设置页里那个收款码是纯粹的打赏——不问、不跳、不弹窗，你要翻到「支持作者」里才会看到。打赏不会带来额外功能、优先支持或任何授权。
+下面的收款码是纯粹的打赏——不问、不跳、不弹窗，你要翻到设置里的「支持作者」才会看到。打赏不会带来额外功能、优先支持或任何授权。
 
-> 如果你 fork 了这个项目并想换成自己的收款方式：删掉 `app/src/main/res/drawable-nodpi/donate_wechat_qr.png`、改掉 `SupportScreen.kt` 与 `strings.xml` 里的相关文案即可。
->
-> 另外提醒一句：**个人收款码放在公开页面上有一定风控风险**（可能被判定为经营性收款），且二维码图片被替换你察觉不到。风险更低的替代是爱发电 / GitHub Sponsors 这类赞助平台链接。
+<img src="docs/donate_wechat_qr.png" width="220" alt="微信打赏收款码">
 
----
-
-## 独立性声明
-
-本项目为**独立实现**：仓库内所有源码均为自行编写，未复制任何第三方项目的代码。
-
-宿主侧的结论全部来自对 `com.tencent.wetype` 安装包的反汇编分析。项目在设想的阶段参考过同类模块的公开讨论，但架构与实现（尤其是跨进程设置通道、hook 入口组织方式）是自选的——例如本项目**不**把设置界面注入宿主进程。
-
-## 免责声明
+### 免责声明
 
 - 本项目**非官方**，与腾讯公司无关。
 - 它只修改**本机**输入法的运行时布局，不修改、不重打包宿主 APK，不触碰其签名。
 - 仅供学习与个人使用。使用前请自行评估风险并备份数据。
 - 「微信」「微信输入法」商标归腾讯公司所有，本项目仅作指称使用。
 
-## License
+### License
 
-MIT，见 [LICENSE](LICENSE)。
+[GNU AGPL-3.0](LICENSE)。改了这个项目并通过网络提供服务，你需要公开你的源码。
+
+---
+
+## English
+
+### What it is
+
+WeType (WeChat Input Method) lays its keyboard out for **phone portrait width**. On an unfolded foldable or in landscape it collapses into a narrow column with huge side margins. That is not a bug — it is a host-imposed ceiling: every width in the layout chain is multiplied by one scale factor, and that factor is derived from the phone's short edge.
+
+This module raises that **ceiling**. It hard-codes no sizes, so WeType's own size adjuster still works, and 100% now means the full screen width instead of a phone-wide column.
+
+**LSPosed module. No host APK modification, no repackaging, no signature changes — methods only.**
+
+### Features
+
+**Two switches** (both default to on):
+
+| Switch | What it does |
+|---|---|
+| **Unlock keyboard width** | Raises the width ceiling on unfolded / landscape screens. The built-in adjuster keeps its full travel |
+| **Unlock single-hand mode** | WeType disables single-hand mode outright on large screens (the check chain hard-codes "not unfolded"). This forces it back on |
+
+**Always on, no switch**:
+
+- **Symmetric side margins** — drag either side in "keyboard adjust" and the other side moves the opposite way by the same amount. The keyboard's centre line always coincides with the screen's.
+- **Adjust overlay matches the content area** — the dark scrim drawn during adjustment now tracks the real keyboard bounds (the host's preview path omits one side's delta; this module supplies it).
+- **Hand / split mutual exclusion** — turning one on turns the other off.
+- **Single-hand button placement** — when the keyboard hugs the left edge, the Reset/Cancel/OK bar hugs the right, and vice versa.
+
+> ⚠️ **The cost of forcing single-hand mode**: the host's single-hand layout (modifier keys, font size, max width constraints) was designed around phone widths. Forcing it on a large screen **distorts the layout and shrinks the font**. That follows from the host's own design assumptions; this module cannot fix it. Leave the switch off if you don't want it.
+
+### Test environment
+
+Verified on the following setup:
+
+| | |
+|---|---|
+| Device | Xiaomi 18 Fold (codename `lhasa`, model `2608BPX34C`) |
+| Display | Inner 1672 × 2364 (landscape 2364 × 1672); outer 1168 × 1712 |
+| Host | WeType `com.tencent.wetype` **3.5.3.56201** |
+| Framework | LSPosed (libxposed API **102**) |
+| Build | JDK 21 · Gradle 9.6.0 · Kotlin 2.0 · compileSdk 37 / minSdk 31 / targetSdk 37 |
+
+WeType runs its keyboard logic in a separate `:hld` process. **You must restart WeType after installing the module**, otherwise that process has no module loaded.
+
+Other devices and OS versions are untested. If a future host build renames the internal methods, the affected feature degrades to "not applied" rather than crashing.
+
+### Install
+
+1. Rooted device with LSPosed installed.
+2. Install the APK.
+3. Enable the module in **LSPosed**.
+4. Set its scope to **WeType** (`com.tencent.wetype`) — nothing else is needed.
+5. Force-stop WeType once so it reloads (there is a "Restart WeType" button in the app).
+6. Open the module's settings and toggle what you need.
+
+> If you still have the older `com.xposed.wetypehook` module installed, **disable it first**. Both hook the same methods, and running them together double-hooks.
+
+### Build
+
+JDK 21 and an Android SDK with compileSdk 37.
+
+```bash
+echo "sdk.dir=/path/to/android-sdk" > local.properties
+./gradlew :app:assembleRelease
+zipalign -f -p 4 app/build/outputs/apk/release/WeTypePlus-<version>_release.apk aligned.apk
+apksigner sign --ks your.jks --out WeTypePlus-<version>-signed.apk aligned.apk
+```
+
+### How it works
+
+- **No hard-coded sizes.** The module raises the shared scale factor, so the whole chain's ceiling moves together and the adjuster keeps its full travel.
+- **No reads of host static fields.** Host classes are resolved with `Class.forName(name, false, …)` so `<clinit>` never runs. The host's static initialisation depends on an attached `Application`; triggering it while installing hooks **crashes the input method on startup**. Hooking *methods* is safe.
+- **Fail-closed.** Every hook bails out on mismatch, so a renamed host method disables one feature instead of crashing the keyboard.
+
+**Two processes, one legitimate channel.** The switches live in this app and are consumed inside WeType's process. Private storage is not readable across uids, so the transport is an exported `ContentProvider`:
+
+```
+[module app process]                     [WeType process]
+  MainActivity                             WeTypeLayoutHooks
+      │ write                                  │ read (1 s cache)
+      ▼                                        ▼
+  SharedPreferences  ──►  SettingsProvider  ──►  content://cn.dsr213.wetypeplus.settings
+```
+
+The settings screen is therefore an ordinary activity in an ordinary process. The provider exposes exactly one `query` returning one row of two 0/1 columns.
+
+### Support
+
+**This module is free and stays free. Every feature is on by default — there is nothing to unlock.**
+
+The QR code below is purely a tip jar. It is buried in Settings → Support, it never pops up, and donating gets you no extra features, no priority support and no licence.
+
+<img src="docs/donate_wechat_qr.png" width="220" alt="WeChat tip QR code">
+
+### Disclaimer
+
+- Unofficial project, not affiliated with Tencent.
+- It only changes the runtime layout of the input method **on your own device**. It does not modify, repackage or re-sign the host APK.
+- For learning and personal use. Assess the risk yourself and back up your data.
+- "微信" / "WeChat" / "微信输入法" / "WeType" are trademarks of Tencent. Used here for reference only.
+
+### License
+
+[GNU AGPL-3.0](LICENSE). If you modify this project and offer it over a network, you must publish your source.

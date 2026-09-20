@@ -20,7 +20,7 @@ import cn.dsr213.wetypeplus.KeyboardSettings
  * documented mechanism for exactly this problem, and it lets the settings screen be an ordinary
  * activity in an ordinary process.
  *
- * The surface is intentionally tiny: one `query` returning one row of four 0/1 columns. There is
+ * The surface is intentionally tiny: one `query` returning one row of two 0/1 columns. There is
  * nothing else to call - no inserts, no updates, no file paths.
  */
 class SettingsProvider : ContentProvider() {
@@ -44,9 +44,7 @@ class SettingsProvider : ContentProvider() {
         columns.addRow(
             arrayOf(
                 if (settings.unlockKeyboardWidth) 1 else 0,
-                if (settings.unlockSingleHandMode) 1 else 0,
-                if (settings.syncSideMargins) 1 else 0,
-                if (settings.exclusiveHandSplit) 1 else 0
+                if (settings.unlockSingleHandMode) 1 else 0
             )
         )
         return columns

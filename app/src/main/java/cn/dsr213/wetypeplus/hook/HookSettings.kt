@@ -17,6 +17,9 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Any failure (provider not callable, host not installed, no `Application` yet) keeps the last
  * known values, or the defaults, which are all-features-on.
+ *
+ * Only genuinely optional behaviour lives here. Margin centring and hand/split exclusivity do not:
+ * they are structural, so they are unconditional in [WeTypeLayoutHooks] rather than configurable.
  */
 object HookSettings {
     private const val CACHE_TTL_MS = 1000L
@@ -30,10 +33,6 @@ object HookSettings {
     val unlockKeyboardWidth: Boolean get() = snapshot().unlockKeyboardWidth
 
     val unlockSingleHandMode: Boolean get() = snapshot().unlockSingleHandMode
-
-    val syncSideMargins: Boolean get() = snapshot().syncSideMargins
-
-    val exclusiveHandSplit: Boolean get() = snapshot().exclusiveHandSplit
 
     fun prepareForHotReload() {
         cached = KeyboardSettings.DEFAULT
@@ -58,12 +57,10 @@ object HookSettings {
             .query(SettingsProvider.CONTENT_URI, null, null, null, null)
             ?.use { cursor ->
                 // Column order is KeyboardSettings.COLUMNS, written by the provider above.
-                if (!cursor.moveToFirst() || cursor.columnCount < 4) return@use null
+                if (!cursor.moveToFirst() || cursor.columnCount < 2) return@use null
                 KeyboardSettings(
                     unlockKeyboardWidth = cursor.getInt(0) != 0,
-                    unlockSingleHandMode = cursor.getInt(1) != 0,
-                    syncSideMargins = cursor.getInt(2) != 0,
-                    exclusiveHandSplit = cursor.getInt(3) != 0
+                    unlockSingleHandMode = cursor.getInt(1) != 0
                 )
             }
     }.getOrNull()

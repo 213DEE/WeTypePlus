@@ -113,6 +113,52 @@ private const val MARGIN_REPORT_LIMIT = 16
 private const val EXCLUSION_REPORT_LIMIT = 6
 
 /**
+ * `adjust.c` - `ImeAdjustViewSingle`, the *merged* ("合体") adjust panel.
+ *
+ * The host's naming is about how many key blocks the panel drives, not about one-handed mode:
+ * `ImeAdjustViewSingle` is the one-block keyboard, `ImeAdjustViewSplit` (`adjust.e`) is the
+ * two-block one. One-handed mode is a separate preference (`i1.k2()`) layered on top.
+ */
+private const val ADJUST_VIEW_SINGLE = "com.tencent.wetype.plugin.hld.adjust.c"
+
+/**
+ * `adjust.f.b(model.Q, keyboardWidth)` - the single call that hands the padding model to the panel.
+ *
+ * Both `adjust.c` and `adjust.e` override it. Everything the scrim and the keyboard body are drawn
+ * from is derived inside that method, so it is the one place worth instrumenting.
+ */
+private const val VIEW_PADDING_SETTER = "b"
+
+/**
+ * Budgets for the geometry probes.
+ *
+ * These exist to be read once, so they are deliberately chatty but strictly capped - a drag emits
+ * dozens of events a second and an uncapped dump would drown the logcat ring buffer.
+ */
+private const val VIEW_PROBE_LIMIT = 8
+
+/** How many distinct preview-path states the panel probe will log. */
+private const val PREVIEW_PROBE_LIMIT = 24
+
+/** How many button-bar realignments get a log line. */
+private const val BUTTON_BAR_REPORT_LIMIT = 6
+
+/**
+ * `ImeAdjustViewSingle` fields holding the last *committed* geometry.
+ *
+ * Verified against the live panel: `b(model.Q, int)` stores the requested keyboard width into `B`
+ * and the left inset derived from the model into `E`. Re-centring the drag preview needs both, and
+ * reading them back beats guessing at the host's pixel-to-panel mapping.
+ */
+private const val COMMIT_WIDTH_FIELD = "B"
+private const val COMMIT_LEFT_FIELD = "E"
+private const val WRITER_PROBE_LIMIT = 24
+private const val RECORD_PROBE_LIMIT = 24
+private const val VIEW_TREE_DUMP_LIMIT = 3
+private const val VIEW_TREE_DEPTH = 3
+private const val VIEW_TREE_CHILDREN = 12
+
+/**
  * The plain (merged, non-split, non-single-hand) left / right margin fields of `a7.b` are `f` / `g`;
  * `model.Q` resolves the pair per scenario:
  * ```
@@ -255,6 +301,14 @@ internal object WeTypeLayoutHooks {
     @Volatile
     private var lastAdjustTuple: String? = null
 
+    /** Last preview-path state logged, so a held finger does not flood the buffer. */
+    @Volatile
+    private var lastPreviewState: String? = null
+    private val previewProbeCount = AtomicInteger()
+
+    /** Bounded breadcrumb for the single-hand button-bar realignment. */
+    private val buttonBarReportCount = AtomicInteger()
+
     /**
      * `true` while the host's own split-keyboard adjust panel is the active one.
      *
@@ -275,15 +329,18 @@ internal object WeTypeLayoutHooks {
     private val marginLastLeft = AtomicInteger(MARGIN_UNSEEN)
     private val marginLastRight = AtomicInteger(MARGIN_UNSEEN)
 
-    /** What we last let through to the host; re-used verbatim when the panel re-emits the same pair. */
-    private val marginOutLeft = AtomicInteger(MARGIN_UNSEEN)
-    private val marginOutRight = AtomicInteger(MARGIN_UNSEEN)
-
-    /** Which side was dragged last; used when the panel replays a stale value for the other one. */
+    /** Which side was dragged last; diagnostic only - see `reportMargin`. */
     private val marginLatchedSide = AtomicInteger(MARGIN_SIDE_NONE)
 
     /** Bounded breadcrumb for the single-hand / split-keyboard exclusivity. */
     private val exclusionReportCount = AtomicInteger()
+
+    // Geometry probes. Cheap, read-once instrumentation for the adjust panel; see
+    // `hookAdjustGeometryProbe` for what each one is meant to rule in or out.
+    private val viewProbeCount = AtomicInteger()
+    private val viewTreeCount = AtomicInteger()
+    private val writerProbeCount = AtomicInteger()
+    private val recordProbeCount = AtomicInteger()
 
     @Volatile
     private var floatMethod: java.lang.reflect.Method? = null
@@ -301,6 +358,7 @@ internal object WeTypeLayoutHooks {
         hookKeyboardPadding()
         hookAdjustSplitDetector()
         hookAdjustMarginSync()
+        hookAdjustGeometryProbe()
         hookHandSplitExclusion()
         hookSingleHandModeGate()
     }
@@ -317,12 +375,17 @@ internal object WeTypeLayoutHooks {
         gateReportCount.set(0)
         adjustProbeCount.set(0)
         exclusionReportCount.set(0)
+        viewProbeCount.set(0)
+        viewTreeCount.set(0)
+        writerProbeCount.set(0)
+        recordProbeCount.set(0)
+        previewProbeCount.set(0)
+        buttonBarReportCount.set(0)
+        lastPreviewState = null
         lastAdjustTuple = null
         splitAdjustActive = false
         marginLastLeft.set(MARGIN_UNSEEN)
         marginLastRight.set(MARGIN_UNSEEN)
-        marginOutLeft.set(MARGIN_UNSEEN)
-        marginOutRight.set(MARGIN_UNSEEN)
         marginLatchedSide.set(MARGIN_SIDE_NONE)
         diagnosticLogged.set(false)
         floatMethod = null
@@ -573,23 +636,32 @@ internal object WeTypeLayoutHooks {
     // ------------------------------------------------------------- linked side margins
 
     /**
-     * Keeps the merged keyboard centred by mirroring whichever margin the user just dragged.
+     * Keeps the keyboard centred while it is being resized, by mirroring the *delta* of whichever
+     * margin the user just dragged onto the other one.
      *
-     * On-device logs show the host's own merged panel is *not* symmetric: `ImeAdjustViewSingle`
-     * carries one handle per side and hands both over at once as `Mgr.b(d, left, right, e, gap)` -
-     * observed as `b(685,764,272,14,260)` right before `Q.o() = 764` and `Q.p() = 272`. The
-     * untouched side is replayed verbatim out of the panel's own store, and that is exactly what
-     * makes "which side moved" detectable here without duplicating the host's branch logic: compare
-     * each argument against the previous call's.
+     * The user's own definition of "sync" (2026-09-21): 「左右留白联动，左边往右缩多少，右边就往左
+     * 缩多少，保持键盘始终居中」- merged and split keyboards both treat their two margins as one
+     * centred whole; only one-handed mode is deliberately left-aligned or right-aligned. Shifting
+     * both sides by the same delta preserves whatever symmetry the pair already has, so a centred
+     * keyboard stays centred for the whole drag.
      *
-     * [CORRECTION 2026-09-21] An earlier revision mirrored the fields *inside* `model.Q.o()` /
-     * `p()`. That could never work: both setters run back to back on every event, so the mirror
-     * written by `o()` was overwritten by `p()` a moment later - which is exactly the "one side
-     * moves, the other does not follow" the user reported. Rewriting the arguments at the single
-     * entry point keeps the preview and the committed value consistent by construction.
+     * On-device logs show the panel is not symmetric at rest: `ImeAdjustViewSingle` carries one
+     * handle per side and hands both over at once as `Mgr.b(d, left, right, e, gap)`, with the
+     * untouched side replayed verbatim out of the panel's own store. Comparing each argument against
+     * the previous call's is what makes "which side moved" detectable without duplicating the host's
+     * branch logic.
      *
-     * Split and single-hand keyboards are deliberately left alone - their two sides are *meant* to
-     * differ, so syncing them would destroy the feature.
+     * Two corrections are folded in here, both driven by on-device evidence:
+     *
+     * - *2026-09-21 a*: an earlier revision mirrored the fields *inside* `model.Q.o()` / `p()`. That
+     *   could never work - both setters run back to back on every event, so the mirror written by
+     *   `o()` was overwritten by `p()` a moment later. Rewriting the arguments at the single entry
+     *   point keeps the preview and the committed value consistent by construction.
+     * - *2026-09-21 b*: a second revision wrote the dragged side's **absolute value** into both
+     *   slots. That is not centring, it is re-basing, and it is expensive: the host computes its own
+     *   `keyboardWidth = totalWidth - Q.j() - Q.l()`, so replacing an observed `(386, 1101)` pair
+     *   with `(1101, 1101)` silently removes 715px of keyboard width. That is the "over-shrunk,
+     *   squashed together" report, and it also displaces the keyboard body relative to the scrim.
      */
     private fun hookAdjustMarginSync() {
         runCatching {
@@ -616,14 +688,18 @@ internal object WeTypeLayoutHooks {
     }
 
     /**
-     * Rewrites `(d, left, right, e, gap)` so both margins end up holding the dragged side's value.
+     * Rewrites `(d, left, right, e, gap)` so the keyboard sits centred, without changing its width.
      *
-     * **The baseline is the panel's raw input, not the value we wrote back.** That distinction is the
-     * whole fix. The panel keeps its *own* stored pair and re-emits `(itsDraggedValue, itsStoredOtherValue)`
-     * on every frame of a drag; the stored side is sticky and does not follow what reached the host
-     * (measured: it stayed pinned at `997` for four consecutive events while the host was applying `490`).
-     * Comparing the next raw pair against what we wrote therefore makes that stale side look like the
-     * dragged one on the very next event, and the keyboard flips between the two margins:
+     * The rule is one line: hand back `(sum / 2, sum - sum / 2)` where `sum = left + right`. See the
+     * comments inside for why the sum must survive untouched and the difference must not, and for the
+     * two earlier revisions the on-device logs disproved.
+     *
+     * **The baseline is the panel's raw input, not the value we wrote back.** That distinction still
+     * matters for detecting a fresh event versus a re-emission. The panel keeps its *own* stored pair
+     * and re-emits it on every frame of a drag; the stored side is sticky and does not follow what
+     * reached the host (measured: it stayed pinned at `997` for four consecutive events while the host
+     * was applying `490`). Comparing the next raw pair against what we wrote therefore makes that
+     * stale side look like the dragged one on the very next event:
      * ```
      * Adjust b: left,right=490,997 -> 490,490 | side=1
      * Adjust b: left,right=490,997 -> 997,997 | side=2   <- same input, opposite output
@@ -631,25 +707,38 @@ internal object WeTypeLayoutHooks {
      * So: compare raw against raw, and when the raw pair is unchanged (the panel re-emitting while the
      * finger is held) simply hold the previous output instead of re-deciding.
      *
-     * Both slots are always written back, including when the feature is off, so the host never sees a
-     * half-rewritten argument list.
+     * Both slots are always written back, so the host never sees a half-rewritten argument list.
+     *
+     * Centring is not a preference. [2026-09-21] It used to sit behind a `syncSideMargins` switch;
+     * that switch is gone, because a stored `false` from an earlier install - or any settings read
+     * that came back empty - would have handed the keyboard back the broken, permanently off-centre
+     * layout this function exists to fix. Single-hand mode is the only remaining short circuit.
      */
     private fun applyMarginSync(label: String, args: Array<Any?>?) {
         if (args == null || args.size != ADJUST_ARG_COUNT) return
         val left = args[ADJUST_LEFT_INDEX] as? Int ?: return
         val right = args[ADJUST_RIGHT_INDEX] as? Int ?: return
 
-        val enabled = HookSettings.syncSideMargins
         val split = splitAdjustActive
         val hand = singleHandActive()
 
-        // Sync off (or a layout whose two sides are *meant* to differ): pure pass-through, no state.
-        if (!enabled || split || hand) {
+        // Only one-handed mode is left alone: there the keyboard is meant to hug one edge, so
+        // centring it would destroy the mode outright.
+        //
+        // The split keyboard needs no special case. Its panel hands over an already-symmetric pair -
+        // on-device: `Adjust b: left,right=99,99`, `=258,258`, `=80,80`, `=71,71`, i.e. the two
+        // blocks are scaled as one centred whole and the difference is already zero - so `sum / 2`
+        // returns exactly what came in. [CORRECTION 2026-09-21] An intermediate revision excluded
+        // the split panel only in its comment but not in its code, and its delta-mirroring then
+        // turned `(99, 99)` into `(-1047, 99)`: a negative inset, which visibly broke a keyboard
+        // that had been working. Centring is an identity transform on a symmetric pair, so the
+        // split board is now safe by construction rather than by a branch.
+        if (hand) {
             args[ADJUST_LEFT_INDEX] = left
             args[ADJUST_RIGHT_INDEX] = right
-            rememberMargins(left, right, left, right)
+            rememberMargins(left, right)
             reportMargin(label, left, right, left, right, false, MARGIN_SIDE_NONE, false, false,
-                enabled, split, hand)
+                split, hand)
             return
         }
 
@@ -673,38 +762,65 @@ internal object WeTypeLayoutHooks {
         }
         if (side != MARGIN_SIDE_NONE) marginLatchedSide.set(side)
 
-        // `decided` = this event carried news we could act on. Otherwise the previous output stands:
-        // passing the raw pair through here would show the user the un-synced layout they complained
-        // about ("偶尔两边没同步"), which is exactly what a both-moved-but-no-latch event used to do.
-        val decided = !first && !repeated && side != MARGIN_SIDE_NONE
-        val outLeft: Int
-        val outRight: Int
-        if (decided) {
-            val dragged = if (side == MARGIN_SIDE_LEFT) left else right
-            outLeft = dragged
-            outRight = dragged
-        } else if (first) {
-            outLeft = left
-            outRight = right
-        } else {
-            // Repeated input, or both sides moved with no latch to break the tie: hold.
-            outLeft = marginOutLeft.get()
-            outRight = marginOutRight.get()
-        }
+        // Centre, unconditionally - including on the first event, so opening the adjust panel while
+        // the keyboard sits off-centre shows it centred straight away rather than only once a finger
+        // moves. `side` above is now purely diagnostic: the action no longer depends on which handle
+        // moved, only on the pair the panel handed over.
+        //
+        // The host's own arithmetic (`Mgr.w()` ends with
+        // `keyboardWidth = m1.z1(keyboardType, 1, null) - Q.j() - Q.l()`) makes the pair carry two
+        // independent jobs:
+        //
+        //   * `left + right`  -> how WIDE the keyboard is (the sum is subtracted from the total)
+        //   * `left - right`  -> WHERE it sits (the difference is the off-centre offset)
+        //
+        // So the only way to centre without touching the width the user just dragged to is to keep
+        // the sum and zero the difference - i.e. hand back `sum / 2` on both sides. Splitting the sum
+        // is also an identity transform on an already-symmetric pair, which is exactly what the split
+        // panel emits (`99,99` / `258,258` / `80,80` / `71,71` on device), so that board is correct
+        // by construction and needs no branch of its own.
+        //
+        // Two earlier revisions got this wrong in opposite directions, and the on-device logs name
+        // both:
+        //
+        //   [1.0.1-alpha] `outLeft = outRight = dragged`. Zeroed the difference (centred, good) but
+        //   re-based the sum onto the dragged side, inflating it by `|left - right|` per event.
+        //   Observed `(386, 1101) -> (1101, 1101)`: 715px of keyboard width gone in one frame - the
+        //   "over-shrunk, squashed together" report.
+        //
+        //   [1.0.3-alpha] shifted both sides by the *delta* instead, preserving `left - right`. An
+        //   honest sum, but it can never centre anything: the panel's pair is not symmetric to begin
+        //   with (`Adjust b: left,right=79,530` opens the drag) and preserving a non-zero difference
+        //   keeps the keyboard off-centre for the whole gesture. The "合体键盘没有始终保持居中"
+        //   report. Worse, it also applied that delta to the split board, turning its symmetric
+        //   `(99, 99)` into `(-1047, 99)` - a negative inset, which broke a keyboard that had been
+        //   working.
+        //
+        // Preserving the sum also keeps this safe at the extremes: `left + right` is by construction
+        // a pair the panel itself produced, so the keyboard width can never collapse the way a
+        // re-based sum could.
+        //
+        // Both sides take `(left + right) / 2`, so the pair is *exactly* symmetric - the difference
+        // is a hard zero, not "one pixel off" - and the sum can only ever shrink by the parity bit,
+        // never grow. A smaller sum means a *wider* keyboard, so this rounding direction can never
+        // squeeze the board: at worst it hands back one pixel the user had already given up. (The
+        // mirror-image choice, `outRight = sum - outLeft`, would preserve the sum exactly but leave
+        // an odd pair 1px off centre, which contradicts "始终保持居中".)
+        val half = (left + right) / 2
+        val outLeft = half
+        val outRight = half
 
         args[ADJUST_LEFT_INDEX] = outLeft
         args[ADJUST_RIGHT_INDEX] = outRight
-        rememberMargins(left, right, outLeft, outRight)
-        reportMargin(label, left, right, outLeft, outRight, decided, side, first, repeated,
-            enabled, split, hand)
+        rememberMargins(left, right)
+        reportMargin(label, left, right, outLeft, outRight,
+            outLeft != left || outRight != right, side, first, repeated, split, hand)
     }
 
-    /** Records the raw baseline (next event's comparison) alongside the value we actually applied. */
-    private fun rememberMargins(rawLeft: Int, rawRight: Int, outLeft: Int, outRight: Int) {
+    /** Records the panel's raw pair, which is the baseline the *next* event is compared against. */
+    private fun rememberMargins(rawLeft: Int, rawRight: Int) {
         marginLastLeft.set(rawLeft)
         marginLastRight.set(rawRight)
-        marginOutLeft.set(outLeft)
-        marginOutRight.set(outRight)
     }
 
     private fun reportMargin(
@@ -717,7 +833,6 @@ internal object WeTypeLayoutHooks {
         side: Int,
         first: Boolean,
         repeated: Boolean,
-        enabled: Boolean,
         split: Boolean,
         hand: Boolean,
     ) {
@@ -728,7 +843,7 @@ internal object WeTypeLayoutHooks {
         Log.i(
             "Adjust $label: left,right=$rawLeft,$rawRight -> $outLeft,$outRight" +
                 " | applied=$applied side=$side first=$first hold=$repeated" +
-                " enabled=$enabled split=$split hand=$hand"
+                " split=$split hand=$hand"
         )
     }
 
@@ -914,6 +1029,421 @@ internal object WeTypeLayoutHooks {
             Log.i("Failed: Observe keyboard padding via $PADDING_MODEL")
             Log.i(error)
         }
+    }
+
+    // ------------------------------------------------------------------ geometry probes
+
+    /**
+     * Read-once instrumentation for the merged adjust panel. It exists to settle the two questions
+     * that static reading could not.
+     *
+     * **1. Which View is the dark scrim, and what decides its edges?** `adjust.c.b(Q, width)` is the
+     * call in which the host hands the padding model down to the panel, so every number that shapes
+     * the scrim and the keyboard body is in scope there. The tree dump is taken from a *posted*
+     * runnable, because at setter time the children still carry the previous frame's bounds.
+     *
+     * **2. Does the margin rewrite reach the host at all?** `Mgr.b()` fans out to `m1.B2()` (the
+     * preview record). If `Mgr.b` logs a synced pair while `B2` logs the raw one, then the
+     * `param.args` write-back is not taking effect and the fix has to move elsewhere.
+     *
+     * One host invariant is worth writing down, because everything else obeys it. `Mgr.w()` ends
+     * with:
+     * ```
+     * keyboardWidth = m1.z1(keyboardType, 1, null) - Q.j() - Q.l()
+     * Mgr.C(Q, keyboardWidth)
+     * ```
+     * so `left + keyboardWidth + right == totalWidth` holds by construction. Rewriting one side
+     * without compensating the other therefore *both* moves and resizes the keyboard - which is the
+     * "over-shrunk, squashed together" the user reported.
+     */
+    private fun hookAdjustGeometryProbe() {
+        hookViewPaddingSetter()
+        hookPaddingWriters()
+        hookPaddingRecords()
+        hookAdjustPanelPreview()
+    }
+
+    /** Instruments the one method that turns `model.Q` into panel geometry on both panel variants. */
+    private fun hookViewPaddingSetter() {
+        listOf(ADJUST_VIEW_SINGLE, ADJUST_VIEW_SPLIT).forEach { className ->
+            runCatching {
+                val owner = loadClassOrNull(className) ?: error("Failed to resolve $className")
+                val setter = owner.declaredMethods.firstOrNull { candidate ->
+                    candidate.name == VIEW_PADDING_SETTER &&
+                        candidate.parameterTypes.size == 2 &&
+                        candidate.parameterTypes[0].name == PADDING_MODEL &&
+                        candidate.parameterTypes[1] == PRIMITIVE_INT &&
+                        candidate.returnType == PRIMITIVE_VOID
+                }?.apply { isAccessible = true }
+                    ?: error("No ${VIEW_PADDING_SETTER}($PADDING_MODEL, int) on $className")
+
+                setter.hookAfter { param ->
+                    // Runs on every commit, including while a handle is being dragged, because the
+                    // host re-decides the bar's side only in single-hand mode - and only this module
+                    // knows where the keyboard ended up.
+                    if (className == ADJUST_VIEW_SINGLE && alignButtonBar(param.thisObject)) {
+                        if (buttonBarReportCount.incrementAndGet() <= BUTTON_BAR_REPORT_LIMIT) {
+                            Log.i("Success: Single-hand button bar realigned via $className")
+                        }
+                    }
+                    val model = param.args?.getOrNull(0)
+                    val width = param.args?.getOrNull(1) as? Int ?: 0
+                    val left = intGetter(model, "j")
+                    val right = intGetter(model, "l")
+                    if (viewProbeCount.incrementAndGet() <= VIEW_PROBE_LIMIT) {
+                        Log.i(
+                            "Panel geometry $className: width=$width left=$left right=$right" +
+                                " sum=${width + left + right}" +
+                                " | q[${paddingFields(model)}]" +
+                                " | view[${intFields(param.thisObject)}]"
+                        )
+                    }
+                    val view = param.thisObject as? android.view.View ?: return@hookAfter
+                    if (viewTreeCount.incrementAndGet() > VIEW_TREE_DUMP_LIMIT) return@hookAfter
+                    view.post { Log.i("Panel tree $className:${viewTree(view)}") }
+                }
+                Log.i("Success: Probe adjust panel geometry via $className.$VIEW_PADDING_SETTER()")
+            }.onFailure { error ->
+                Log.i("Failed: Probe adjust panel geometry via $className.$VIEW_PADDING_SETTER()")
+                Log.i(error)
+            }
+        }
+    }
+
+    /**
+     * Records which `a7.b` field each padding setter actually lands in.
+     *
+     * `o()` / `p()` pick between `f`/`g`, `h`/`i` and `k`/`l` at call time, so a value can reach the
+     * model and still be invisible to a reader that lands on a different branch. Logging the written
+     * value next to what the matching getter reads back removes that whole class of doubt.
+     */
+    private fun hookPaddingWriters() {
+        runCatching {
+            val owner = loadClassOrNull(PADDING_MODEL) ?: error("Failed to resolve $PADDING_MODEL")
+            var installed = 0
+            listOf("o" to "j", "p" to "l").forEach { (setterName, getterName) ->
+                val setter = owner.declaredMethods.firstOrNull { candidate ->
+                    candidate.name == setterName &&
+                        candidate.parameterTypes.size == 1 &&
+                        candidate.parameterTypes[0] == PRIMITIVE_INT &&
+                        candidate.returnType == PRIMITIVE_VOID
+                }?.apply { isAccessible = true } ?: return@forEach
+
+                setter.hookAfter { param ->
+                    if (writerProbeCount.incrementAndGet() <= WRITER_PROBE_LIMIT) {
+                        Log.i(
+                            "Padding write: Q.$setterName(${param.args?.getOrNull(0)})" +
+                                " -> $getterName()=${intGetter(param.thisObject, getterName)}" +
+                                " | ${intFields(param.thisObject)}"
+                        )
+                    }
+                }
+                installed++
+            }
+            if (installed == 0) error("No padding setters matched")
+            Log.i("Success: Probe padding writers via $PADDING_MODEL.o()/p()")
+        }.onFailure { error ->
+            Log.i("Failed: Probe padding writers via $PADDING_MODEL.o()/p()")
+            Log.i(error)
+        }
+    }
+
+    /**
+     * The point of the whole probe set: `Mgr.b()` records through `m1.B2()`, `Mgr.c()` through
+     * `i1.M3()`. Logging both entries shows whether the rewritten arguments actually arrive.
+     */
+    private fun hookPaddingRecords() {
+        listOf(M1 to "B2", SETTINGS to "M3").forEach { (className, methodName) ->
+            runCatching {
+                val owner = loadClassOrNull(className) ?: error("Failed to resolve $className")
+                val record = owner.declaredMethods.firstOrNull { candidate ->
+                    candidate.name == methodName &&
+                        candidate.parameterTypes.size == ADJUST_ARG_COUNT &&
+                        candidate.parameterTypes.all { it == PRIMITIVE_INT } &&
+                        candidate.returnType == PRIMITIVE_VOID
+                }?.apply { isAccessible = true }
+                    ?: error("No $methodName(IIIII) on $className")
+
+                record.hookBefore { param ->
+                    if (recordProbeCount.incrementAndGet() <= RECORD_PROBE_LIMIT) {
+                        Log.i(
+                            "Padding record: ${className.substringAfterLast('.')}.$methodName(" +
+                                param.args.joinToString(",") + ") <- ${callerHint()}"
+                        )
+                    }
+                }
+                Log.i("Success: Probe padding record via $className.$methodName()")
+            }.onFailure { error ->
+                Log.i("Failed: Probe padding record via $className.$methodName()")
+                Log.i(error)
+            }
+        }
+    }
+
+    /** Calls a no-arg `int` getter by name, tolerating whatever the host obfuscator renamed. */
+    private fun intGetter(target: Any?, name: String): Int = runCatching {
+        val method = target?.javaClass?.declaredMethods?.firstOrNull {
+            it.name == name && it.parameterTypes.isEmpty() && it.returnType == PRIMITIVE_INT
+        }?.apply { isAccessible = true } ?: return@runCatching MARGIN_UNSEEN
+        method.invoke(target) as? Int ?: MARGIN_UNSEEN
+    }.getOrDefault(MARGIN_UNSEEN)
+
+    /** Every `int` field an object carries, so a stale one is visible at a glance. */
+    private fun intFields(instance: Any?): String = runCatching {
+        if (instance == null) return@runCatching "n/a"
+        instance.javaClass.declaredFields
+            .filter { it.type == PRIMITIVE_INT }
+            .joinToString(" ") { field ->
+                field.isAccessible = true
+                "${field.name}=${field.get(instance)}"
+            }
+    }.getOrElse { "n/a" }
+
+    /** Reads one primitive `int` field by name, or null when the class does not declare it. */
+    private fun intField(instance: Any?, name: String): Int? = runCatching {
+        if (instance == null) return@runCatching null
+        instance.javaClass.getDeclaredField(name)
+            .apply { isAccessible = true }
+            .get(instance) as? Int
+    }.getOrNull()
+
+    /**
+     * The panel's content container - the view the dark scrim is drawn into.
+     *
+     * `ImeAdjustViewSingle` keeps it in the `d` field, and both of its layout entry points rewrite
+     * that one view's margin and width.
+     */
+    private fun panelContentView(panel: Any?): android.view.View? = runCatching {
+        if (panel == null) return@runCatching null
+        panel.javaClass.getDeclaredField("d")
+            .apply { isAccessible = true }
+            .get(panel) as? android.view.View
+    }.getOrNull()
+
+    /**
+     * Re-centres the merged panel's *preview* frame, mirroring what the split panel already does.
+     *
+     * The two panel variants lay their content out through different entry points, and only the split
+     * one is symmetric:
+     * ```
+     * ImeAdjustViewSplit.q()   left = (keyboardWidthTotal - keyboardWidth) / 2 - p1 + p3
+     * ImeAdjustViewSingle.m()  left = E + p1                                     <- p3 missing
+     * ```
+     * A merged drag that moves only the right handle arrives with `p1 = 0`, so the host's own formula
+     * leaves the left edge where it was and pulls only the right edge in. The keyboard underneath is
+     * driven from `model.Q` (which this module keeps centred) while the scrim is driven from this
+     * preview, so the two visibly drift apart - the user's "遮罩没有同步".
+     *
+     * `m()` does not hand over the transformed `p1` / `p3`, but they can be recovered from what the
+     * host wrote, since its two assignments are `width = B - p1 + p3` and `left = E + p1`:
+     * ```
+     * p1 = left - E
+     * p3 = width - B + p1
+     * ```
+     * Substituting those into the split panel's symmetric form (`left = E + p1 - p3`,
+     * `width = B - 2*p1 + 2*p3`) collapses to plain arithmetic on the committed pair, so the host's
+     * own pixel-to-panel mapping never has to be reproduced:
+     * ```
+     * width = 2*previewWidth - B
+     * left  = E + B - previewWidth
+     * ```
+     * Worked example from the on-device capture (`E=327, B=1710, previewWidth=1696`): left becomes
+     * `327 + 1710 - 1696 = 341`, width becomes `2*1696 - 1710 = 1682`, and `(2364 - 1682) / 2 = 341`
+     * - exactly centred, which the host's own output (`left=327, width=1696`) was not.
+     *
+     * @return true when the layout params were rewritten.
+     */
+    private fun centrePreviewFrame(panel: Any?): Boolean {
+        if (singleHandActive()) return false
+        val content = panelContentView(panel) ?: return false
+        val params = content.layoutParams as? android.view.ViewGroup.MarginLayoutParams ?: return false
+        val committedWidth = intField(panel, COMMIT_WIDTH_FIELD) ?: return false
+        val committedLeft = intField(panel, COMMIT_LEFT_FIELD) ?: return false
+        val previewWidth = params.width
+        if (committedWidth <= 0 || previewWidth <= 0) return false
+
+        val mirroredWidth = 2 * previewWidth - committedWidth
+        val mirroredLeft = committedLeft + committedWidth - previewWidth
+        // A non-positive width would collapse the board; a negative inset would push it off-screen.
+        if (mirroredWidth <= 0 || mirroredLeft < 0) return false
+        if (params.width == mirroredWidth && params.marginStart == mirroredLeft) return false
+
+        params.width = mirroredWidth
+        params.setMarginStart(mirroredLeft)
+        content.layoutParams = params
+        return true
+    }
+
+    /**
+     * One line per node of a view subtree: class, laid-out bounds, margins, translation, alpha.
+     * Depth- and breadth-limited because the panel has more than two dozen children.
+     */
+    private fun viewTree(root: android.view.View): String {
+        val builder = StringBuilder()
+        fun walk(view: android.view.View, depth: Int, index: Int) {
+            builder.append('\n').append("  ".repeat(depth))
+            if (depth > 0) builder.append(index).append(": ")
+            builder.append(view.javaClass.simpleName)
+                .append(" (").append(view.left).append(',').append(view.top)
+                .append(" -> ").append(view.right).append(',').append(view.bottom).append(')')
+                .append(" wh=").append(view.width).append('x').append(view.height)
+                .append(" vis=").append(view.visibility)
+                .append(" alpha=").append(view.alpha)
+                .append(" tx=").append(view.translationX.toInt())
+                .append(" ty=").append(view.translationY.toInt())
+            (view.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let { params ->
+                builder.append(" m=").append(params.leftMargin).append(',').append(params.topMargin)
+                    .append(',').append(params.rightMargin).append(',').append(params.bottomMargin)
+            }
+            if (depth >= VIEW_TREE_DEPTH) return
+            val group = view as? android.view.ViewGroup ?: return
+            val shown = minOf(group.childCount, VIEW_TREE_CHILDREN)
+            for (child in 0 until shown) walk(group.getChildAt(child), depth + 1, child)
+            if (group.childCount > shown) {
+                builder.append('\n').append("  ".repeat(depth + 1))
+                    .append("... ").append(group.childCount - shown).append(" more")
+            }
+        }
+        walk(root, 0, 0)
+        return builder.toString()
+    }
+
+    /** The nearest *host* frame above the probe, so a second call path is not mistaken for the first. */
+    private fun callerHint(): String = runCatching {
+        Throwable().stackTrace
+            .firstOrNull { frame ->
+                frame.className.contains("wetype") && !frame.className.contains("wetypeplus")
+            }
+            ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+            ?: "?"
+    }.getOrDefault("?")
+
+    /**
+     * Instruments `ImeAdjustViewSingle.m(int, int, int, int)` - the *preview* path.
+     *
+     * The panel lays itself out through two different entry points. The commit path
+     * (`b(Q, width)`) takes its margin straight from `model.Q`; the preview path takes four pixel
+     * offsets and applies them on top of whatever margin the commit path last stored in `E`. Only the
+     * commit path sees this module's rewritten padding pair, so if a drag is rendered purely through
+     * the preview path the container keeps a stale margin - which is the suspected reason the dark
+     * scrim and the keyboard content no longer coincide. Logging the offsets alongside the panel's
+     * own `E` and the container's laid-out bounds decides that per event.
+     */
+    private fun hookAdjustPanelPreview() {
+        runCatching {
+            val owner = loadClassOrNull(ADJUST_VIEW_SINGLE)
+                ?: error("Failed to resolve $ADJUST_VIEW_SINGLE")
+            val preview = owner.declaredMethods.firstOrNull { candidate ->
+                candidate.name == "m" &&
+                    candidate.parameterTypes.size == 4 &&
+                    candidate.parameterTypes.all { it == PRIMITIVE_INT } &&
+                    candidate.returnType == PRIMITIVE_VOID
+            }?.apply { isAccessible = true }
+                ?: error("No m(int,int,int,int) on $ADJUST_VIEW_SINGLE")
+
+            preview.hookAfter { param ->
+                val hostOutput = panelContentBounds(param.thisObject)
+                val rewritten = centrePreviewFrame(param.thisObject)
+                val state = intFields(param.thisObject)
+                if (state == lastPreviewState) return@hookAfter
+                lastPreviewState = state
+                if (previewProbeCount.incrementAndGet() > PREVIEW_PROBE_LIMIT) return@hookAfter
+                val offsets = param.args?.joinToString(",") ?: "?"
+                Log.i("Panel preview m($offsets): $state")
+                Log.i("Panel preview host: $hostOutput")
+                Log.i("Panel preview ours (rewritten=$rewritten): ${panelContentBounds(param.thisObject)}")
+            }
+            Log.i("Success: Sync adjust panel preview via $ADJUST_VIEW_SINGLE.m()")
+        }.onFailure { error ->
+            Log.i("Failed: Probe adjust panel preview via $ADJUST_VIEW_SINGLE.m()")
+            Log.i(error)
+        }
+    }
+
+    /**
+     * The scrim container's live geometry - the `d` field view, its layout params and its parent.
+     *
+     * The container's `marginStart` is what the user sees as the scrim's left edge, so it has to be
+     * read from the laid-out view rather than from the panel's bookkeeping fields.
+     */
+    private fun panelContentBounds(panel: Any?): String = runCatching {
+        val content = panelContentView(panel) ?: return@runCatching "d=null"
+        val params = content.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+        val parent = content.parent as? android.view.View
+        val parentText = if (parent == null) "?"
+        else "${parent.javaClass.simpleName} wh=${parent.width}x${parent.height}"
+        "d[bounds=${content.left},${content.top}->${content.right},${content.bottom}" +
+            " w=${content.width} vis=${content.visibility}" +
+            " lp.w=${params?.width} top=${params?.topMargin} start=${params?.marginStart}]" +
+            " parent=$parentText"
+    }.getOrElse { "n/a" }
+
+    /**
+     * Pins the reset / cancel / confirm bar to the side *opposite* the docked keyboard.
+     *
+     * `ImeAdjustViewSingle` inflates that bar from XML as a centred `RelativeLayout` and never
+     * repositions it, so in single-hand mode the bar ends up under the keyboard - the user's
+     * "单手键盘的三个按钮位置不对，要贴近键盘相反的方向".
+     *
+     * Direction is read from the content container instead of from a settings flag, because the
+     * host exposes single-hand mode only as a boolean: `model.Q`'s insets are what dock the
+     * container to an edge, so where the container sits *is* where the keyboard sits. A container
+     * that is roughly centred keeps the bar centred, which is what the host already does.
+     *
+     * The container holds exactly one `RelativeLayout` child (the bar - the others are four
+     * `FrameLayout` handles, a background `View` and the keyboard surface), so no view id is needed.
+     *
+     * @return true when the bar's layout params were rewritten.
+     */
+    private fun alignButtonBar(panel: Any?): Boolean {
+        val content = panelContentView(panel) as? android.view.ViewGroup ?: return false
+        val parent = content.parent as? android.view.View ?: return false
+        val total = parent.width
+        if (total <= 0) return false
+
+        val contentParams = content.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+            ?: return false
+        val inset = contentParams.marginStart
+        val width = if (content.width > 0) content.width else contentParams.width
+        if (width <= 0 || inset < 0) return false
+
+        // Compare centres rather than edges: a docked keyboard can be wider or narrower than half the
+        // screen, but its centre is still clearly off the middle. The eighth-of-a-screen tolerance
+        // keeps a centred keyboard (and the small wobble of a live drag) from flipping the bar.
+        val offset = (inset + width / 2) - total / 2
+        if (kotlin.math.abs(offset) < total / 8) return false
+        val shouldHugRight = offset < 0
+
+        var bar: android.view.View? = null
+        for (index in 0 until content.childCount) {
+            val child = content.getChildAt(index)
+            if (child is android.widget.RelativeLayout) {
+                bar = child
+                break
+            }
+        }
+        val barView = bar ?: return false
+        val barParams = barView.layoutParams as? android.widget.RelativeLayout.LayoutParams
+            ?: return false
+
+        val wanted = if (shouldHugRight) android.widget.RelativeLayout.ALIGN_PARENT_RIGHT
+        else android.widget.RelativeLayout.ALIGN_PARENT_LEFT
+        val other = if (shouldHugRight) android.widget.RelativeLayout.ALIGN_PARENT_LEFT
+        else android.widget.RelativeLayout.ALIGN_PARENT_RIGHT
+        if (barParams.getRule(wanted) == android.widget.RelativeLayout.TRUE &&
+            barParams.getRule(other) != android.widget.RelativeLayout.TRUE
+        ) {
+            return false
+        }
+
+        barParams.removeRule(android.widget.RelativeLayout.CENTER_HORIZONTAL)
+        barParams.removeRule(other)
+        barParams.addRule(wanted, android.widget.RelativeLayout.TRUE)
+        barParams.addRule(android.widget.RelativeLayout.CENTER_VERTICAL, android.widget.RelativeLayout.TRUE)
+        barParams.leftMargin = 0
+        barParams.rightMargin = 0
+        barView.layoutParams = barParams
+        return true
     }
 
     // --------------------------------------------------------------- single-hand mode

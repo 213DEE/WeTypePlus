@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">微信输入法增强</string>
-    <string name="xposed_description">解除微信输入法在大屏（折叠屏展开 / 横屏）下的限制：键盘宽度上限、单手模式门控、左右留白联动。</string>
+    <string name="xposed_description">解除微信输入法在大屏（折叠屏展开 / 横屏）下的限制：键盘宽度上限、单手模式门控，并让尺寸调节保持居中。</string>
 
     <!-- 通用 -->
     <string name="action_restart_wetype">重启微信输入法</string>
@@ -23,10 +23,6 @@
     <string name="settings_unlock_width_desc">抬高展开屏 / 横屏下的宽度上限。键盘自带的尺寸调节滑块仍然可以正常拉伸。</string>
     <string name="settings_single_hand_title">强开单手模式</string>
     <string name="settings_single_hand_desc">微信输入法在展开屏上会禁用单手模式。开启后强制生效，但请注意这套布局是按手机宽度设计的。</string>
-    <string name="settings_sync_padding_title">左右留白联动</string>
-    <string name="settings_sync_padding_desc">拖动一侧留白时，另一侧自动跟同，让键盘保持居中。</string>
-    <string name="settings_exclusive_title">单手 / 分体互斥</string>
-    <string name="settings_exclusive_desc">开启其中一个时，自动关闭另一个。</string>
 
     <!-- 支持作者 -->
     <string name="support_title">支持作者</string>
@@ -38,5 +34,7 @@
 
     <!-- 关于 -->
     <string name="about_version">版本 %1$s</string>
-    <string name="about_independent">独立实现，不含任何第三方项目源码。</string>
+    <string name="about_github_title">GitHub</string>
+    <string name="about_github_summary">项目主页 · 源码与更新</string>
+    <string name="about_link_failed">这台设备上没有能打开链接的应用</string>
 </resources>
