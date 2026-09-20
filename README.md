@@ -45,10 +45,11 @@
 | 项 | 值 |
 |---|---|
 | 设备 | Xiaomi 18 Fold（产品代号 `lhasa` / 型号 `2608BPX34C`） |
-| 屏幕 | 内屏 1672 × 2364（展开横屏 2364 × 1672）；外屏 1168 × 1712 |
+| 系统 | Android **17**（API 37）· 小米澎湃 OS **OS4.0.11.0.XPNCNXM** · 安全补丁 2026-08-01 · `arm64-v8a` |
+| 屏幕 | 外屏 1168 × 1712 @ 440 dpi；内屏 1672 × 2364（展开横屏 2364 × 1672） |
 | 宿主 | 微信输入法 `com.tencent.wetype` **3.5.3.56201** |
-| 框架 | LSPosed（libxposed API **102**） |
-| 模块构建 | JDK 21 · Gradle 9.6.0 · Kotlin 2.0 · compileSdk 37 / minSdk 31 / targetSdk 37 |
+| 框架 | **LSPosed v2.2.0 (7854)**，运行在 **KernelSU v3.3.0**（Zygisk 启用）· libxposed API **102** |
+| 模块构建 | JDK 21.0.2 · Gradle 9.6.0 · Kotlin 2.3.21 · AGP 9.4.0 · compileSdk 37 / minSdk 31 / targetSdk 37 |
 
 宿主的布局逻辑跑在独立的 `:hld` 进程里，装完模块**必须重启一次微信输入法**，否则那个进程里没有模块。
 
@@ -198,10 +199,11 @@ Verified on the following setup:
 | | |
 |---|---|
 | Device | Xiaomi 18 Fold (codename `lhasa`, model `2608BPX34C`) |
-| Display | Inner 1672 × 2364 (landscape 2364 × 1672); outer 1168 × 1712 |
+| OS | Android **17** (API 37) · HyperOS **OS4.0.11.0.XPNCNXM** · security patch 2026-08-01 · `arm64-v8a` |
+| Display | Outer 1168 × 1712 @ 440 dpi; inner 1672 × 2364 (landscape 2364 × 1672) |
 | Host | WeType `com.tencent.wetype` **3.5.3.56201** |
-| Framework | LSPosed (libxposed API **102**) |
-| Build | JDK 21 · Gradle 9.6.0 · Kotlin 2.0 · compileSdk 37 / minSdk 31 / targetSdk 37 |
+| Framework | **LSPosed v2.2.0 (7854)** on **KernelSU v3.3.0** (Zygisk enabled) · libxposed API **102** |
+| Build | JDK 21.0.2 · Gradle 9.6.0 · Kotlin 2.3.21 · AGP 9.4.0 · compileSdk 37 / minSdk 31 / targetSdk 37 |
 
 WeType runs its keyboard logic in a separate `:hld` process. **You must restart WeType after installing the module**, otherwise that process has no module loaded.
 
