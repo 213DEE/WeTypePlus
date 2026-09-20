@@ -266,9 +266,18 @@ internal object WeTypeLayoutHooks {
     @Volatile
     private var splitAdjustActive = false
 
-    /** Left / right margins as handed over by the previous panel call; `Int.MIN_VALUE` = unseen. */
+    /**
+     * Left / right margins exactly as the panel handed them over, i.e. the *raw* pair.
+     *
+     * This - not the rewritten pair - is the baseline the next event is compared against, because the
+     * panel replays its own stored value for the side that was not dragged (see `applyMarginSync`).
+     */
     private val marginLastLeft = AtomicInteger(MARGIN_UNSEEN)
     private val marginLastRight = AtomicInteger(MARGIN_UNSEEN)
+
+    /** What we last let through to the host; re-used verbatim when the panel re-emits the same pair. */
+    private val marginOutLeft = AtomicInteger(MARGIN_UNSEEN)
+    private val marginOutRight = AtomicInteger(MARGIN_UNSEEN)
 
     /** Which side was dragged last; used when the panel replays a stale value for the other one. */
     private val marginLatchedSide = AtomicInteger(MARGIN_SIDE_NONE)
@@ -312,6 +321,8 @@ internal object WeTypeLayoutHooks {
         splitAdjustActive = false
         marginLastLeft.set(MARGIN_UNSEEN)
         marginLastRight.set(MARGIN_UNSEEN)
+        marginOutLeft.set(MARGIN_UNSEEN)
+        marginOutRight.set(MARGIN_UNSEEN)
         marginLatchedSide.set(MARGIN_SIDE_NONE)
         diagnosticLogged.set(false)
         floatMethod = null
@@ -607,9 +618,21 @@ internal object WeTypeLayoutHooks {
     /**
      * Rewrites `(d, left, right, e, gap)` so both margins end up holding the dragged side's value.
      *
-     * Both slots are always written back, even when nothing is done to them: the panel's own values
-     * are the baseline for the *next* call, so the baseline has to track what actually reached the
-     * host rather than what the panel offered.
+     * **The baseline is the panel's raw input, not the value we wrote back.** That distinction is the
+     * whole fix. The panel keeps its *own* stored pair and re-emits `(itsDraggedValue, itsStoredOtherValue)`
+     * on every frame of a drag; the stored side is sticky and does not follow what reached the host
+     * (measured: it stayed pinned at `997` for four consecutive events while the host was applying `490`).
+     * Comparing the next raw pair against what we wrote therefore makes that stale side look like the
+     * dragged one on the very next event, and the keyboard flips between the two margins:
+     * ```
+     * Adjust b: left,right=490,997 -> 490,490 | side=1
+     * Adjust b: left,right=490,997 -> 997,997 | side=2   <- same input, opposite output
+     * ```
+     * So: compare raw against raw, and when the raw pair is unchanged (the panel re-emitting while the
+     * finger is held) simply hold the previous output instead of re-deciding.
+     *
+     * Both slots are always written back, including when the feature is off, so the host never sees a
+     * half-rewritten argument list.
      */
     private fun applyMarginSync(label: String, args: Array<Any?>?) {
         if (args == null || args.size != ADJUST_ARG_COUNT) return
@@ -620,12 +643,23 @@ internal object WeTypeLayoutHooks {
         val split = splitAdjustActive
         val hand = singleHandActive()
 
+        // Sync off (or a layout whose two sides are *meant* to differ): pure pass-through, no state.
+        if (!enabled || split || hand) {
+            args[ADJUST_LEFT_INDEX] = left
+            args[ADJUST_RIGHT_INDEX] = right
+            rememberMargins(left, right, left, right)
+            reportMargin(label, left, right, left, right, false, MARGIN_SIDE_NONE, false, false,
+                enabled, split, hand)
+            return
+        }
+
         val previousLeft = marginLastLeft.get()
         val previousRight = marginLastRight.get()
         val first = previousLeft == MARGIN_UNSEEN || previousRight == MARGIN_UNSEEN
+        val repeated = !first && left == previousLeft && right == previousRight
 
         var side = MARGIN_SIDE_NONE
-        if (!first) {
+        if (!first && !repeated) {
             val leftMoved = left != previousLeft
             val rightMoved = right != previousRight
             side = when {
@@ -637,32 +671,65 @@ internal object WeTypeLayoutHooks {
                 else -> MARGIN_SIDE_NONE
             }
         }
-
-        val applied = enabled && !split && !hand && !first && side != MARGIN_SIDE_NONE
         if (side != MARGIN_SIDE_NONE) marginLatchedSide.set(side)
 
-        var outLeft = left
-        var outRight = right
-        if (applied) {
+        // `decided` = this event carried news we could act on. Otherwise the previous output stands:
+        // passing the raw pair through here would show the user the un-synced layout they complained
+        // about ("偶尔两边没同步"), which is exactly what a both-moved-but-no-latch event used to do.
+        val decided = !first && !repeated && side != MARGIN_SIDE_NONE
+        val outLeft: Int
+        val outRight: Int
+        if (decided) {
             val dragged = if (side == MARGIN_SIDE_LEFT) left else right
             outLeft = dragged
             outRight = dragged
+        } else if (first) {
+            outLeft = left
+            outRight = right
+        } else {
+            // Repeated input, or both sides moved with no latch to break the tie: hold.
+            outLeft = marginOutLeft.get()
+            outRight = marginOutRight.get()
         }
+
         args[ADJUST_LEFT_INDEX] = outLeft
         args[ADJUST_RIGHT_INDEX] = outRight
-        marginLastLeft.set(outLeft)
-        marginLastRight.set(outRight)
+        rememberMargins(left, right, outLeft, outRight)
+        reportMargin(label, left, right, outLeft, outRight, decided, side, first, repeated,
+            enabled, split, hand)
+    }
 
-        val tuple = "$label:$outLeft,$outRight"
+    /** Records the raw baseline (next event's comparison) alongside the value we actually applied. */
+    private fun rememberMargins(rawLeft: Int, rawRight: Int, outLeft: Int, outRight: Int) {
+        marginLastLeft.set(rawLeft)
+        marginLastRight.set(rawRight)
+        marginOutLeft.set(outLeft)
+        marginOutRight.set(outRight)
+    }
+
+    private fun reportMargin(
+        label: String,
+        rawLeft: Int,
+        rawRight: Int,
+        outLeft: Int,
+        outRight: Int,
+        applied: Boolean,
+        side: Int,
+        first: Boolean,
+        repeated: Boolean,
+        enabled: Boolean,
+        split: Boolean,
+        hand: Boolean,
+    ) {
+        val tuple = "$label:$rawLeft,$rawRight->$outLeft,$outRight|$side|$applied|$first|$repeated"
         if (tuple == lastAdjustTuple) return
         lastAdjustTuple = tuple
-        if (marginSyncReportCount.incrementAndGet() <= MARGIN_REPORT_LIMIT) {
-            Log.i(
-                "Adjust $label: left,right=$left,$right -> $outLeft,$outRight" +
-                    " | applied=$applied side=$side first=$first" +
-                    " enabled=$enabled split=$split hand=$hand"
-            )
-        }
+        if (marginSyncReportCount.incrementAndGet() > MARGIN_REPORT_LIMIT) return
+        Log.i(
+            "Adjust $label: left,right=$rawLeft,$rawRight -> $outLeft,$outRight" +
+                " | applied=$applied side=$side first=$first hold=$repeated" +
+                " enabled=$enabled split=$split hand=$hand"
+        )
     }
 
     /** `i1.k2()` - the host's single-hand gate; in that mode the two margins are meant to differ. */
