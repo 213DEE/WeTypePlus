@@ -32,13 +32,6 @@
 | **解除键盘宽度上限** | 抬高展开屏 / 横屏下的宽度上限。调节滑块的全部行程保留 |
 | **强开单手模式** | 宿主在展开屏上直接禁用了单手模式（判断链里写死了「非展开屏」）。开启后强制生效 |
 
-**默认生效，没有开关**：
-
-- **左右留白联动居中**——在「键盘调节」里拖动任意一侧，另一侧朝反方向走同样距离。键盘输入区域的中轴线始终和整屏中轴线重合。
-- **调节遮罩与输入区域重合**——调节时那层深色半透明遮罩，边界始终等于键盘输入区域的边界（宿主的预览路径少算了一侧增量，本模块补上）。
-- **单手 / 分体互斥**——开一个自动关另一个。
-- **单手模式下按钮贴对侧**——键盘靠左，重置/取消/确定 就贴右；靠右就贴左。
-
 > ⚠️ **强开单手模式的代价**：宿主的单手布局（辅助键位置、字号、最大宽度约束）都是按手机宽度设计的。在展开屏上强行打开，**布局会走形、字号会变小**。这是宿主的设计前提决定的，不是本模块能修的。如果你不接受，把它关掉即可。
 
 ### 测试环境
@@ -188,13 +181,6 @@ This module does the two things the host refuses to do:
 |---|---|
 | **Unlock keyboard width** | Raises the width ceiling on unfolded / landscape screens. The built-in adjuster keeps its full travel |
 | **Unlock single-hand mode** | WeType disables single-hand mode outright on large screens (the check chain hard-codes "not unfolded"). This forces it back on |
-
-**Always on, no switch**:
-
-- **Symmetric side margins** — drag either side in "keyboard adjust" and the other side moves the opposite way by the same amount. The keyboard's centre line always coincides with the screen's.
-- **Adjust overlay matches the content area** — the dark scrim drawn during adjustment now tracks the real keyboard bounds (the host's preview path omits one side's delta; this module supplies it).
-- **Hand / split mutual exclusion** — turning one on turns the other off.
-- **Single-hand button placement** — when the keyboard hugs the left edge, the Reset/Cancel/OK bar hugs the right, and vice versa.
 
 > ⚠️ **The cost of forcing single-hand mode**: the host's single-hand layout (modifier keys, font size, max width constraints) was designed around phone widths. Forcing it on a large screen **distorts the layout and shrinks the font**. That follows from the host's own design assumptions; this module cannot fix it. Leave the switch off if you don't want it.
 
