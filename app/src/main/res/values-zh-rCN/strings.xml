@@ -27,7 +27,7 @@
     <!-- 支持作者 -->
     <string name="support_title">支持作者</string>
     <string name="support_desc">请作者喝杯咖啡</string>
-    <string name="support_intro">本模块免费，并且会一直免费。所有功能默认就是开的，下面的收款码只是纯粹的打赏，不解锁任何东西。</string>
+    <string name="support_intro">Alpha 阶段将始终保持免费，所有功能默认就是开的，下面的收款码只是纯粹的打赏，不解锁任何东西。不排除将来推出 Beta 或正式版后，部分功能收费的可能。</string>
     <string name="support_qr_hint">微信 · 点一下看大图</string>
     <string name="support_disclaimer">打赏完全自愿，不会带来额外功能、优先支持或任何授权。不打赏也照常好用。</string>
     <string name="support_qr_cd">微信打赏收款码</string>

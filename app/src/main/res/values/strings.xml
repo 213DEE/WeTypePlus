@@ -27,7 +27,7 @@
     <!-- Support -->
     <string name="support_title">Support the author</string>
     <string name="support_desc">Buy me a coffee</string>
-    <string name="support_intro">This module is free and stays free. Every feature is unlocked by default — the code below is purely a tip jar and unlocks nothing.</string>
+    <string name="support_intro">Free throughout the Alpha stage. Every feature is unlocked by default, and the code below is purely a tip jar that unlocks nothing. Charging for some features after a future Beta or stable release is not ruled out.</string>
     <string name="support_qr_hint">WeChat · tap to enlarge</string>
     <string name="support_disclaimer">Donations are voluntary and give no extra features, no priority support and no licence. Thanks either way.</string>
     <string name="support_qr_cd">WeChat tip QR code</string>

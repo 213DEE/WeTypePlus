@@ -83,7 +83,7 @@ Failed: ...           某个 hook 没装上（不影响其他功能）
 
 ### 支持作者
 
-**本模块免费，并且会一直免费。所有功能默认就是开的，不存在解锁一说。**
+**关于收费**：Alpha 阶段将始终保持免费——所有功能默认就是开的，不存在解锁一说；不排除将来推出 Beta 或正式版后，部分功能收费的可能。
 
 下面的收款码是纯粹的打赏——不问、不跳、不弹窗，你要翻到设置里的「支持作者」才会看到。打赏不会带来额外功能、优先支持或任何授权。
 
@@ -156,7 +156,7 @@ Other devices and OS versions are untested. If a future host build renames the i
 
 ### Support
 
-**This module is free and stays free. Every feature is on by default — there is nothing to unlock.**
+**On pricing**: free throughout the Alpha stage — every feature is on by default, and there is nothing to unlock. Charging for some features after a future Beta or stable release is **not ruled out**.
 
 The QR code below is purely a tip jar. It is buried in Settings → Support, it never pops up, and donating gets you no extra features, no priority support and no licence.
 
