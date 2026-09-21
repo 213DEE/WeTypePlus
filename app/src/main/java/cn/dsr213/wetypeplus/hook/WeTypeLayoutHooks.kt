@@ -68,13 +68,21 @@ private const val FLOAT_SINGLETON = "com.tencent.wetype.plugin.hld.float.f"
 /** `model.Q` - the per-scenario keyboard padding model ("adjust keyboard size"). */
 private const val PADDING_MODEL = "com.tencent.wetype.plugin.hld.model.Q"
 
-/** `Z0` - holds `P1()`, the first half of the padding branch test (`Z0.P1() && m1.X1()`). */
+/** `Z0` - holds `P1()` (split keyboard) and `V3(Z)` (its setter), both used by the exclusion hook. */
 private const val PADDING_GATE = "${UTILS}Z0"
 
 /** `adjust.b` - `ImeAdjustViewMgr`; the *single* entry point of the "adjust keyboard size" panel. */
 private const val ADJUST_MANAGER = "com.tencent.wetype.plugin.hld.adjust.b"
 
-/** `adjust.f` - `ImeAdjustViewSuper`, the base type returned by `Mgr.j(Context)`. */
+/**
+ * `adjust.f` - `ImeAdjustViewSuper`, the base type returned by `Mgr.j(Context)`.
+ *
+ * ⚠️ **Do not hook its methods to intercept panel behaviour.** `Mgr.A(t)` calls its `a(...)` through
+ * the declared type `adjust.f`, but the receiver is always `adjust.c` or `adjust.e`, and each of
+ * those declares its own `a(...)`. A libxposed hook binds one `ArtMethod`, so a hook on
+ * `adjust.f.a` is never entered - the 1.0.15/1.0.16 builds capped a value that no live panel ever
+ * read. `adjust.e` is also where `Mgr.j()`'s split branch lands, for the same reason.
+ */
 private const val ADJUST_VIEW_SUPER = "com.tencent.wetype.plugin.hld.adjust.f"
 
 /** `adjust.e` - `ImeAdjustViewSplit`; `Mgr.j()` builds this instead of `adjust.c` when split. */
@@ -94,13 +102,225 @@ private const val ADJUST_VIEW_SPLIT = "com.tencent.wetype.plugin.hld.adjust.e"
  */
 private const val ADJUST_PREVIEW = "b"
 private const val ADJUST_COMMIT = "c"
+
+/**
+ * `Mgr.x(...)` - the private commit path, and the only place one-handed mode is ever switched off by
+ * the resize gesture.
+ *
+ * Read-only here: the floor it is guarded by is applied upstream in [applyMarginSync], on arguments
+ * that reach `Mgr.x` unchanged. What this proves is that the guard actually lands - the alternative,
+ * trusting the argument rewrite without watching its consumer, is exactly the mistake the earlier
+ * `model.Q.o()` clamp made.
+ */
+private const val ADJUST_COMMIT_GATE = "x"
+
+/** How many `Mgr.x(...)` decisions get a log line. */
+private const val ADJUST_GATE_LIMIT = 12
+
+/**
+ * `adjust.c.e(I)` / `adjust.c.f(I)` - the two per-edge clamps `adjust.c.m(IIII)` routes the
+ * horizontal drag deltas through.
+ *
+ * `m(p1, p2, p3, p4)` is the gesture's whole geometry, and the four arguments are one delta per
+ * edge: `left_rv` -> `p1`, `top_rv` -> `p2`, `right_rv` -> `p3`, `bottom_rv` -> `p4`, with the
+ * unused slots zeroed by the synthetic default-argument bridge `adjust.c.n(...)`. It hands
+ * `p1` to `e()`, `p3` to `f()`, `p2` to `g()` and `p4` to `d()`, then writes the four results
+ * straight onto the scrim's `LayoutParams` - `width` and `height` on the params, `marginStart` and
+ * `topMargin` through the margin setter. The keyboard body is laid out *inside* that scrim, which is
+ * why a limit here stops the strip and the keyboard in the same frame: there is only one view being
+ * measured.
+ *
+ * Because a single touch event carries exactly one non-zero delta, the two gaps are each a pure
+ * function of one clamp result, and the panel's own report agrees: at touch-up it re-baselines
+ * `B = params.width`, `E = params.marginStart` and then tells `Mgr.b(...)`
+ * `left = E`, `right = w - E - B`. So, with the panel's fields,
+ *
+ * ```
+ * leftGap  = E + e(p1)
+ * rightGap = w - E - B - f(p3)
+ * ```
+ *
+ * Both are exact - that is what makes a floor here land on the pixel rather than near it.
+ */
+private const val ADJUST_CLAMP_LEADING = "e"
+private const val ADJUST_CLAMP_TRAILING = "f"
+
+/**
+ * The five `adjust.c` fields the floor is computed from, all on-device verified.
+ *
+ * `B` is re-baselined from the actual `LayoutParams.width` at every touch-up, and `E` from
+ * `getMarginStart()`, so the pair means "where the keyboard sat when this gesture started" - which
+ * is exactly what the deltas are relative to. `w` is the width budget (the screen width on a live
+ * panel: `w - E - B = 237` matched `J = 237` on device, with `E = 31`, `B = 1404`, `w = 1672`).
+ * `I` / `J` hold the previous frame's two gaps.
+ */
+private const val ADJUST_FIELD_WIDTH = "B"
+private const val ADJUST_FIELD_INSET = "E"
+private const val ADJUST_FIELD_SPAN = "w"
+private const val ADJUST_FIELD_LEFT = "I"
+private const val ADJUST_FIELD_RIGHT = "J"
+
+/** How many edge-floor clamps get a log line. */
+private const val EDGE_FLOOR_LIMIT = 12
+
+/**
+ * The split panel's layout applier - `adjust.e.e(ZIIII)V`, the only writer of the two halves'
+ * `RelativeLayout.LayoutParams`.
+ *
+ * Measured on device, the five arguments mean:
+ * ```
+ * p1 isRight   -> picks the binding: false = the left half, true = the right half
+ * p2 width     -> written straight into LayoutParams.width
+ * p3 height    -> LayoutParams.height
+ * p4 topMargin -> LayoutParams.topMargin
+ * p5 margin    -> setMarginStart() when isRight, setMarginEnd() otherwise
+ * ```
+ * So one call lays out one half: the half is `width` wide and its outer edge sits `margin` from the
+ * screen edge. The board's own width is `screenWidth - 2 * margin - centreGap`, which makes `margin`
+ * the exact inverse of "how wide the keyboard is" - the one number a width ceiling has to hold.
+ */
+private const val ADJUST_SPLIT_APPLY = "e"
+private const val ADJUST_SPLIT_WIDTH_INDEX = 1
+private const val ADJUST_SPLIT_MARGIN_INDEX = 4
+
+/** How many split-panel width clamps get a log line. */
+private const val SPLIT_FLOOR_LIMIT = 12
+
 private const val ADJUST_ARG_COUNT = 5
 private const val ADJUST_LEFT_INDEX = 1
 private const val ADJUST_RIGHT_INDEX = 2
 
+/** How many distinct `k2()` / `Y2()` states get a "Single-hand gate:" line. */
+private const val GATE_TRACE_LIMIT = 24
+
 /** `i1`'s single-hand setter and `Z0`'s split-keyboard setter, kept mutually exclusive. */
 private const val SINGLE_HAND_SETTER = "a5"
 private const val SPLIT_SETTER = "V3"
+
+/** The host's own single-hand preference key - `i1.k2()`'s fourth condition. */
+private const val SINGLE_HAND_SETTING = "ime_enable_single_hand_mode"
+
+/**
+ * `i1.B(String, boolean)` - the settings reader `k2()` uses for that key.
+ *
+ * [CORRECTION 2026-09-21] This was `"C"`. There is no `i1.C(String, boolean)`: `C` exists only as
+ * the Kotlin default-argument bridge `C(i1, String, boolean, int, Object)`, which forwards to `B`.
+ * Invoking `C` with two arguments therefore threw, `userOn` came back `null` in every
+ * "Single-hand gate:" report, and the one condition that actually decides whether the mode is on
+ * was the one condition never visible.
+ */
+private const val SINGLE_HAND_SETTING_READ = "B"
+
+/**
+ * The host's own "this keyboard has outgrown one-handed mode" threshold, in **dp**.
+ *
+ * `Mgr.x(...)` - the method the adjust panel commits through - ends with
+ * ```
+ * if (Math.max(left, right) < m1.m0(130) && i1.k2()) i1.a5(false)
+ * ```
+ * i.e. the moment the wider of the two insets drops under `130dp`, the host silently switches
+ * one-handed mode **off** and the keyboard snaps back to full width. That is the "拖到一定值单手模式
+ * 就自动关闭" behaviour.
+ *
+ * Rather than invent a pixel figure, the floor is read back through the very same `m1.m0(130)` at
+ * runtime. Keeping the two in lockstep is the whole point: the drag now stops exactly one pixel
+ * before the host would have given up on the mode, so the branch above can never fire.
+ */
+private const val SINGLE_HAND_GAP_FLOOR_DP = 130
+
+/** `m1.m0(int)` - the host's dp-to-px helper, and the one `Mgr.x(...)` measures its limit with. */
+private const val DP_TO_PX = "m0"
+
+/** Bounded breadcrumb for the single-hand gap floor. */
+private const val PAD_FLOOR_LIMIT = 8
+
+/**
+ * `adjust.ImeKeyboardResetView` - the move / reset / size pill.
+ *
+ * This is **not** the adjust panel. `adjust.c` / `adjust.e` are the drag surfaces; this
+ * `RelativeLayout` is the three-button affordance that single-hand mode pins to the side opposite
+ * the keyboard. Its class name is uncompromised in the shipped 3.5.3 build.
+ */
+private const val RESET_VIEW = "com.tencent.wetype.plugin.hld.adjust.ImeKeyboardResetView"
+
+/** `ImeKeyboardResetView.e(show, isAdjust)` - the display entry point. */
+private const val RESET_VIEW_SHOW = "e"
+
+/** The companion that owns the show / hide entry point the host actually calls. */
+private const val RESET_VIEW_COMPANION = "$RESET_VIEW\$i"
+private const val RESET_VIEW_TOGGLE = "b"
+
+/** The synthetic back-reference from that companion to the pill instance itself. */
+private const val RESET_VIEW_HOST_FIELD = "this\$0"
+
+/** `f(ZZ)` / `g(ZZ)` - the private pair that reveals the pill's left / right button copy. */
+private const val RESET_VIEW_LEFT_COPY = "f"
+private const val RESET_VIEW_RIGHT_COPY = "g"
+
+/**
+ * `ImeKeyboardResetView.z` - the static behind the companion property `i.a()` / `i.b(Z)`.
+ *
+ * It is the first half of the fold decision and its `<clinit>` starts it `true`, i.e. the strip was
+ * written to arrive expanded and is folded away later by whichever caller wants it out of the way:
+ * ```
+ * p1 = ImeKeyboardResetView.z          // read by e(ZZ) and handed to f / g as the first argument
+ * if (p1 == false || A == true) show <side>_adjust_simple_ll   // the folded three-dot icon
+ * else                          show <side>_adjust_rl          // move / reset / size
+ * ```
+ */
+private const val RESET_VIEW_SHOW_SIMPLE_FLAG = "z"
+
+/**
+ * `ImeKeyboardResetView.A` - the static "a handle was touched just now" latch, and the second half
+ * of that same condition.
+ *
+ * Set to `true` by `onTouch`'s `ACTION_DOWN` for any of the six handles, and cleared to `false` at
+ * the end of **every** `f(ZZ)` / `g(ZZ)` call - so it only speaks for the frame that follows a
+ * press. A `true` here therefore folds the strip away even while `z` still asks for the full one.
+ */
+private const val RESET_VIEW_TOUCHED_FLAG = "A"
+
+/** Bounded breadcrumb for the strip's forced expansion. */
+private const val STRIP_FORCE_REPORT_LIMIT = 8
+
+/**
+ * `m1.q3(View, Integer height, Integer width)` - the host's own "size this view" call.
+ *
+ * `ImeKeyboardResetView.e(ZZ)` reaches it (through the `r3` default-args bridge) as
+ * `q3(this, null, z1(null, 1, null))`, and only on unfolded screens. It assigns straight into
+ * `layoutParams.width`, so it is the single place the pill's width comes from.
+ */
+private const val PILL_WIDTH_SETTER = "q3"
+private const val PILL_WIDTH_LIMIT = 6
+
+/** How far below the pill a view may sit and still count as part of it: row, then cell. */
+private const val PILL_DESCENT_DEPTH = 2
+
+/**
+ * Gap between the pinned affordance and the panel edge, in dp.
+ *
+ * Only meant to keep the strip off the very edge, not to move it inward: the keyboard's own panel
+ * starts about 40px in on this device, so 16dp (44px) puts the strip on the same margin as the
+ * keyboard body it belongs to. Adjusting this one number is the whole tuning surface.
+ */
+private const val RESET_PILL_EDGE_INSET_DP = 16
+
+private const val RESET_VIEW_REPORT_LIMIT = 8
+
+/**
+ * Budgets for the pill probes, deliberately **not** shared.
+ *
+ * The display hook and the laid-out dump used to draw on one counter. The dump spends it within a
+ * couple of frames, after which the display hook goes quiet precisely while the pill is on screen -
+ * which is how a working probe came to look like a dead entry point. One laid-out frame carries
+ * every number that matters, so the budgets stay tiny.
+ */
+private const val RESET_PILL_CALL_LIMIT = 6
+private const val RESET_PILL_TREE_LIMIT = 3
+private const val RESET_PILL_COPY_LIMIT = 4
+
+/** How many ancestors the pill breadcrumb climbs, so the containing box width is in the line. */
+private const val VIEW_CHAIN_DEPTH = 8
 
 /** Sentinels for the margin baseline and the dragged-side latch. */
 private const val MARGIN_UNSEEN = Int.MIN_VALUE
@@ -111,6 +331,9 @@ private const val MARGIN_SIDE_RIGHT = 2
 /** How many breadcrumb lines each of the two new hooks may emit. */
 private const val MARGIN_REPORT_LIMIT = 16
 private const val EXCLUSION_REPORT_LIMIT = 6
+
+/** Bounded breadcrumb for the settings setters, both directions. */
+private const val SETTER_REPORT_LIMIT = 12
 
 /**
  * `adjust.c` - `ImeAdjustViewSingle`, the *merged* ("合体") adjust panel.
@@ -294,8 +517,76 @@ internal object WeTypeLayoutHooks {
     /** Bounded breadcrumb for the resolved padding branch / single-hand gate. */
     private val gateReportCount = AtomicInteger()
 
+    /** Last `k2()` / `Y2()` state reported, so the trace budget survives start-up. */
+    @Volatile
+    private var lastGateTrace: String? = null
+
+    /** Bounded breadcrumb for the single-hand action pill's display calls. */
+    private val resetViewReportCount = AtomicInteger()
+
+    /** Separate budget for the laid-out dump - see [RESET_PILL_TREE_LIMIT]. */
+    private val resetViewTreeCount = AtomicInteger()
+
+    /** Separate budget for the `f` / `g` copy-selection breadcrumb. */
+    private val resetViewCopyCount = AtomicInteger()
+
+    /** Bounded breadcrumb for the strip's forced expansion. */
+    private val stripForceCount = AtomicInteger()
+
+    /** One line per distinct strip state - the fold is driven by repeated layout passes. */
+    @Volatile
+    private var lastStripLine: String? = null
+
+    /**
+     * The pill's two fold flags, resolved once from inside a live `f` / `g` call.
+     *
+     * `getDeclaredField` does not run the host's `<clinit>`, and the `resolved` latch keeps a miss
+     * from being retried - and re-thrown - on every layout pass.
+     */
+    @Volatile
+    private var resetViewShowSimpleField: java.lang.reflect.Field? = null
+
+    @Volatile
+    private var resetViewTouchedField: java.lang.reflect.Field? = null
+
+    @Volatile
+    private var resetViewFlagsResolved = false
+
+    /** Bounded breadcrumb for the host's own `m1.q3` sizing of the pill. */
+    private val pillWidthCount = AtomicInteger()
+
+    /** Bounded breadcrumb for the single-hand gap floor. */
+    private val padFloorCount = AtomicInteger()
+
+    /**
+     * Latched by the `q3` clamp and read by the layout backstop - carries the whole gate with it
+     * (feature on **and** unfolded screen), so the backstop never has to re-derive it.
+     *
+     * Deliberately a plain flag rather than a settings read at every layout: the backstop runs on
+     * the UI thread for every pill layout, and `HookSettings` only caches for a second, so reading
+     * it there would put a `ContentResolver` query inside a layout pass roughly once a second.
+     */
+    @Volatile
+    private var pillPinActive = false
+
+    /** Guards the layout registration - the pill's toggle fires on every show and hide. */
+    private val resetViewBound = AtomicBoolean(false)
+
     /** Bounded breadcrumb for the adjust-panel drag entry points. */
     private val adjustProbeCount = AtomicInteger()
+
+    /** Bounded breadcrumb for the one-hand cut-off decision inside `Mgr.x(...)`. */
+    private val adjustGateCount = AtomicInteger()
+
+    /** Bounded breadcrumb for the size-handle travel cap inside `adjust.c.e()` / `adjust.c.f()`. */
+    private val edgeFloorCount = AtomicInteger()
+
+    /** Bounded breadcrumb for the split panel's width ceiling inside `adjust.e.e()`.
+     *
+     * The split panel writes its two halves' `LayoutParams` itself, so the `adjust.c` travel cap
+     * never sees it - see [hookAdjustSplitEdgeFloor] for the measured geometry that says so.
+     */
+    private val splitFloorCount = AtomicInteger()
 
     /** Last `(d,left,right,e,gap)` tuple seen, so the drag probe only logs real changes. */
     @Volatile
@@ -335,6 +626,18 @@ internal object WeTypeLayoutHooks {
     /** Bounded breadcrumb for the single-hand / split-keyboard exclusivity. */
     private val exclusionReportCount = AtomicInteger()
 
+    /**
+     * Breadcrumb for every settings-setter transition, in both directions.
+     *
+     * The *off* direction is the one that matters: an over-wide keyboard is what turns single-hand
+     * mode off, and until these lines existed no probe in the module could see it happen - the
+     * setter hooks only ever reported the `true` direction.
+     */
+    private val setterReportCount = AtomicInteger()
+
+    @Volatile
+    private var lastSetterTrace: String? = null
+
     // Geometry probes. Cheap, read-once instrumentation for the adjust panel; see
     // `hookAdjustGeometryProbe` for what each one is meant to rule in or out.
     private val viewProbeCount = AtomicInteger()
@@ -361,6 +664,7 @@ internal object WeTypeLayoutHooks {
         hookAdjustGeometryProbe()
         hookHandSplitExclusion()
         hookSingleHandModeGate()
+        hookKeyboardResetView()
     }
 
     /** Drops generation-local state so a hot reload starts from a clean slate. */
@@ -373,8 +677,25 @@ internal object WeTypeLayoutHooks {
         providerReportCount.set(0)
         marginSyncReportCount.set(0)
         gateReportCount.set(0)
+        resetViewReportCount.set(0)
+        resetViewTreeCount.set(0)
+        resetViewCopyCount.set(0)
+        stripForceCount.set(0)
+        lastStripLine = null
+        resetViewShowSimpleField = null
+        resetViewTouchedField = null
+        resetViewFlagsResolved = false
+        pillWidthCount.set(0)
+        padFloorCount.set(0)
+        pillPinActive = false
+        resetViewBound.set(false)
         adjustProbeCount.set(0)
+        adjustGateCount.set(0)
+        edgeFloorCount.set(0)
+        splitFloorCount.set(0)
         exclusionReportCount.set(0)
+        setterReportCount.set(0)
+        lastSetterTrace = null
         viewProbeCount.set(0)
         viewTreeCount.set(0)
         writerProbeCount.set(0)
@@ -383,6 +704,7 @@ internal object WeTypeLayoutHooks {
         buttonBarReportCount.set(0)
         lastPreviewState = null
         lastAdjustTuple = null
+        lastGateTrace = null
         splitAdjustActive = false
         marginLastLeft.set(MARGIN_UNSEEN)
         marginLastRight.set(MARGIN_UNSEEN)
@@ -688,6 +1010,237 @@ internal object WeTypeLayoutHooks {
     }
 
     /**
+     * Watches the decision that used to end one-handed mode mid-drag.
+     *
+     * `Mgr.x(d, left, right, e, gap)` is reached from the commit path only, and it ends with
+     * ```
+     * if (Math.max(left, right) < m1.m0(130) && i1.k2()) i1.a5(false)
+     * ```
+     * Logging the pair it is handed, next to the floor and `k2()` it is judged against, is what makes
+     * "the guard held" an observation rather than an assumption - and when the guard *fails* (a path
+     * that never went through [applyMarginSync], or a `m1.m0` that cannot be resolved) the same line
+     * says so before the mode disappears.
+     */
+    private fun hookAdjustCommitGate() {
+        runCatching {
+            val manager = loadClassOrNull(ADJUST_MANAGER)
+                ?: error("Failed to resolve $ADJUST_MANAGER")
+            val gate = manager.declaredMethods.firstOrNull { candidate ->
+                candidate.name == ADJUST_COMMIT_GATE &&
+                    candidate.parameterTypes.size == ADJUST_ARG_COUNT &&
+                    candidate.parameterTypes.all { it == PRIMITIVE_INT } &&
+                    candidate.returnType == PRIMITIVE_VOID
+            }?.apply { isAccessible = true }
+                ?: throw NoSuchMethodException("$ADJUST_MANAGER#$ADJUST_COMMIT_GATE(IIIII)")
+
+            gate.hookBefore { param ->
+                val left = param.args?.getOrNull(ADJUST_LEFT_INDEX) as? Int ?: return@hookBefore
+                val right = param.args?.getOrNull(ADJUST_RIGHT_INDEX) as? Int ?: return@hookBefore
+                if (adjustGateCount.incrementAndGet() > ADJUST_GATE_LIMIT) return@hookBefore
+                val floor = singleHandGapFloor()
+                val hand = singleHandActive()
+                val wider = maxOf(left, right)
+                Log.i(
+                    "Adjust gate $ADJUST_COMMIT_GATE: left,right=$left,$right wider=$wider" +
+                        " floor=$floor hand=$hand" +
+                        " wouldDisableMode=${floor > 0 && wider < floor && hand}"
+                )
+            }
+            Log.i("Success: Watch one-hand cut-off via $ADJUST_MANAGER.$ADJUST_COMMIT_GATE()")
+        }.onFailure { error ->
+            Log.i("Failed: Watch one-hand cut-off via $ADJUST_MANAGER.$ADJUST_COMMIT_GATE()")
+            Log.i(error)
+        }
+    }
+
+    /**
+     * Turns the host's own one-handed cut-off into a hard stop for the size handle.
+     *
+     * The gesture never consults `model.Q`: `adjust.c.m(IIII)` hands each edge delta to its own
+     * clamp and writes the result straight onto the scrim's `LayoutParams`, which the keyboard body
+     * is laid out inside. So the clamps - not the padding model, and not `Mgr.b` / `Mgr.c` - are
+     * where a drag can actually be stopped, and capping them stops the strip and the keyboard in the
+     * same frame because there is only one view being measured.
+     *
+     * The floor is the *gap*, not the width: the rule is "the side the keyboard is docked away from
+     * never gets narrower than [singleHandGapFloor]". Which side that is comes from the panel's own
+     * `I` / `J`, so the same code covers the left- and the right-handed dock without knowing which
+     * one is in play. If the far side already carries the floor the near side is left alone - that
+     * is what keeps the keyboard flush against its own edge instead of floating in the middle.
+     *
+     * Both clamps return a *delta*, so the cap is applied to the return value:
+     *
+     * - `f(p3)` moves the trailing edge. `rightGap = w - E - B - f(p3)`, so the result is capped at
+     *   `w - E - B - floor`.
+     * - `e(p1)` moves the leading edge. `leftGap = E + e(p1)`, so the result is raised to
+     *   `floor - E`.
+     *
+     * Because the trailing gap does not depend on `e()`'s result at all, and a single touch event
+     * only ever carries one non-zero delta, the two clamps cannot fight each other.
+     *
+     * Gated on [singleHandActive]: taking a full-width span away from the merged panel would break
+     * the ordinary resize gesture, and the same `adjust.c` is also the plain (non-single-hand) panel.
+     */
+    private fun hookAdjustEdgeFloor() {
+        runCatching {
+            val panel = loadClassOrNull(ADJUST_VIEW_SINGLE)
+                ?: error("Failed to resolve $ADJUST_VIEW_SINGLE")
+            val widthField = intField(panel, ADJUST_FIELD_WIDTH)
+            val insetField = intField(panel, ADJUST_FIELD_INSET)
+            val spanField = intField(panel, ADJUST_FIELD_SPAN)
+            val leftField = intField(panel, ADJUST_FIELD_LEFT)
+            val rightField = intField(panel, ADJUST_FIELD_RIGHT)
+
+            var installed = 0
+            listOf(ADJUST_CLAMP_LEADING, ADJUST_CLAMP_TRAILING).forEach { name ->
+                val trailing = name == ADJUST_CLAMP_TRAILING
+                val clamp = panel.declaredMethods.firstOrNull { candidate ->
+                    candidate.name == name &&
+                        candidate.parameterTypes.size == 1 &&
+                        candidate.parameterTypes[0] == PRIMITIVE_INT &&
+                        candidate.returnType == PRIMITIVE_INT
+                }?.apply { isAccessible = true } ?: return@forEach
+
+                clamp.hookAfter { param ->
+                    val raw = param.result as? Int ?: return@hookAfter
+                    val floor = singleHandGapFloor()
+                    if (floor <= 0) return@hookAfter
+                    val owner = param.thisObject
+                    val span = spanField.getInt(owner)
+                    val inset = insetField.getInt(owner)
+                    // The gap on the *other* side, as of the previous frame. When it already clears
+                    // the floor the wide side is settled and this edge is free to travel.
+                    val other = if (trailing) leftField.getInt(owner) else rightField.getInt(owner)
+                    if (other >= floor) return@hookAfter
+                    val limit = if (trailing) {
+                        span - inset - widthField.getInt(owner) - floor
+                    } else {
+                        floor - inset
+                    }
+                    if (limit <= 0) return@hookAfter
+                    val capped = if (trailing) minOf(raw, limit) else maxOf(raw, limit)
+                    if (capped == raw) return@hookAfter
+                    if (!singleHandActive()) return@hookAfter
+                    param.result = capped
+                    if (edgeFloorCount.incrementAndGet() <= EDGE_FLOOR_LIMIT) {
+                        Log.i(
+                            "Adjust edge floor $name: $raw -> $capped" +
+                                " span=$span base=${widthField.getInt(owner)} inset=$inset" +
+                                " floor=$floor other=$other hand=true" +
+                                " | q[${paddingFields(currentPaddingModel())}]"
+                        )
+                    }
+                }
+                installed++
+            }
+            if (installed < 2) {
+                error("Only $installed of 2 edge clamps matched in $ADJUST_VIEW_SINGLE")
+            }
+            Log.i(
+                "Success: Cap size-handle travel via $ADJUST_VIEW_SINGLE." +
+                    "$ADJUST_CLAMP_LEADING()/$ADJUST_CLAMP_TRAILING()"
+            )
+        }.onFailure { error ->
+            Log.i(
+                "Failed: Cap size-handle travel via $ADJUST_VIEW_SINGLE." +
+                    "$ADJUST_CLAMP_LEADING()/$ADJUST_CLAMP_TRAILING()"
+            )
+            Log.i(error)
+        }
+    }
+
+    /**
+     * Caps how wide the keyboard may get while one-handed mode is on, on the *split* panel.
+     *
+     * [hookAdjustEdgeFloor] caps `adjust.c`, which is the panel the host builds when the keyboard is
+     * a single block. This device renders the keyboard as two halves in landscape, and the host then
+     * builds `adjust.e` instead - a different class with a different set of clamps - so the travel
+     * cap simply never ran in that orientation. On-device proof, from a drag of the right half's
+     * outer grip out to the screen edge (`_wetype_grip2.sh L1 2126 2340 1315`):
+     * ```
+     * Adjust b: left,right=0,0 -> 143,143 | applied=true ... split=true hand=true
+     * Adjust gate x: left,right=143,143 wider=143 floor=143 hand=true wouldDisableMode=false
+     * ```
+     * The guard held - the mode was *not* switched off - and yet the screenshot taken right after
+     * 确定 shows the board flush against both edges with the action strip collapsed to a tab. So the
+     * two halves are laid out by the panel itself and never consult `model.Q`, which is exactly why
+     * the committed padding pair makes no difference to what the user sees.
+     *
+     * `adjust.e.e(ZIIII)V` is that layout, and it is the only writer of the halves'
+     * `LayoutParams` (see [ADJUST_SPLIT_APPLY] for the argument map). Its `margin` argument is the
+     * inverse of the keyboard's width, because the two halves are symmetric and their outer edges
+     * are pinned to `margin` from the screen edges:
+     * ```
+     * boardWidth = screenWidth - 2 * margin - centreGap
+     * ```
+     * So a floor on `margin` *is* a ceiling on the width. Raising the margin alone would push each
+     * half's outer edge inward and leave its inner edge where it was - the half would spill past the
+     * margin it was just given. Shrinking `width` by the same delta instead keeps the outer edge
+     * exactly where the finger put it and retracts the *inner* edge, so the board stops growing while
+     * the drag continues: the handle travels, the keyboard does not.
+     *
+     * Gated on [singleHandActive], because the same class lays out the ordinary two-handed board,
+     * where a 130dp outer margin would be a visible defect rather than a limit.
+     */
+    private fun hookAdjustSplitEdgeFloor() {
+        runCatching {
+            val panel = loadClassOrNull(ADJUST_VIEW_SPLIT)
+                ?: error("Failed to resolve $ADJUST_VIEW_SPLIT")
+            val apply = panel.declaredMethods.firstOrNull { candidate ->
+                candidate.name == ADJUST_SPLIT_APPLY &&
+                    candidate.parameterTypes.size == ADJUST_ARG_COUNT &&
+                    candidate.parameterTypes[0] == PRIMITIVE_BOOLEAN &&
+                    candidate.parameterTypes.drop(1).all { it == PRIMITIVE_INT } &&
+                    candidate.returnType == PRIMITIVE_VOID
+            }?.apply { isAccessible = true }
+                ?: throw NoSuchMethodException("$ADJUST_VIEW_SPLIT#$ADJUST_SPLIT_APPLY(ZIIII)")
+
+            apply.hookBefore { param ->
+                val args = param.args ?: return@hookBefore
+                val margin = args.getOrNull(ADJUST_SPLIT_MARGIN_INDEX) as? Int ?: return@hookBefore
+                val width = args.getOrNull(ADJUST_SPLIT_WIDTH_INDEX) as? Int ?: return@hookBefore
+                val floor = singleHandGapFloor()
+                if (floor <= 0 || margin >= floor) return@hookBefore
+                if (!singleHandActive()) return@hookBefore
+                val shrink = floor - margin
+                // Refuse a clamp that would leave a negative width, which would be a broken layout
+                // rather than a limit. On a screen this narrow for the margin to reach the floor the
+                // halves are already small, so this only guards a pathological frame.
+                if (width - shrink <= 0) return@hookBefore
+                args[ADJUST_SPLIT_MARGIN_INDEX] = floor
+                args[ADJUST_SPLIT_WIDTH_INDEX] = width - shrink
+                if (splitFloorCount.incrementAndGet() <= SPLIT_FLOOR_LIMIT) {
+                    Log.i(
+                        "Split width floor $ADJUST_SPLIT_APPLY: margin=$margin->$floor" +
+                            " width=$width->${width - shrink} isRight=${args[0]}" +
+                            " | q[${paddingFields(currentPaddingModel())}]"
+                    )
+                }
+            }
+            Log.i(
+                "Success: Cap split-board width via $ADJUST_VIEW_SPLIT." +
+                    "$ADJUST_SPLIT_APPLY(ZIIII)"
+            )
+        }.onFailure { error ->
+            Log.i(
+                "Failed: Cap split-board width via $ADJUST_VIEW_SPLIT." +
+                    "$ADJUST_SPLIT_APPLY(ZIIII)"
+            )
+            Log.i(error)
+        }
+    }
+
+    /**
+     * Reads one of the panel's `int` fields.
+     *
+     * The panels are Kotlin classes whose fields survive obfuscation as single letters, so the names
+     * in [ADJUST_FIELD_WIDTH] and friends are version-locked rather than stable API. Resolved once
+     * at install time and reused, because these are read on every touch-move of a drag.
+     */
+    private fun intField(owner: Class<*>, name: String): java.lang.reflect.Field =
+        owner.getDeclaredField(name).apply { isAccessible = true }
+
+    /**
      * Rewrites `(d, left, right, e, gap)` so the keyboard sits centred, without changing its width.
      *
      * The rule is one line: hand back `(sum / 2, sum - sum / 2)` where `sum = left + right`. See the
@@ -734,10 +1287,42 @@ internal object WeTypeLayoutHooks {
         // that had been working. Centring is an identity transform on a symmetric pair, so the
         // split board is now safe by construction rather than by a branch.
         if (hand) {
-            args[ADJUST_LEFT_INDEX] = left
-            args[ADJUST_RIGHT_INDEX] = right
+            // One-handed mode is the one case that must *not* be centred, but it is also the one
+            // case that needs a limit: the host switches the mode off the instant the wider inset
+            // falls under its own `130dp` threshold, which is what made "drag the size handle past a
+            // certain point" read as *the feature turning itself off*. Holding that same threshold
+            // as a floor stops the drag one pixel early, so the branch that would disable the mode
+            // can never be reached - and because the preview (`Mgr.b`) and the commit (`Mgr.c`) both
+            // arrive here, the keyboard body and the scrim stop together rather than in two steps.
+            //
+            // Only the *wider* side is raised. That is the side acting as the blank strip: the
+            // keyboard is docked to the opposite edge, so widening it is exactly what shrinks this
+            // value. Raising the narrower side instead would push the keyboard off its edge.
+            val floor = singleHandGapFloor()
+            var outLeft = left
+            var outRight = right
+            if (floor > 0 && maxOf(left, right) < floor) {
+                if (left > right) outLeft = floor
+                else if (right > left) outRight = floor
+                else {
+                    // A dead-centre pair under the floor has no "wider" side to pick, and the host
+                    // reaches that state by dragging the keyboard out to nearly full width. Move both
+                    // so the pair stays symmetric, which is what that gesture expects to see.
+                    outLeft = floor
+                    outRight = floor
+                }
+                if (padFloorCount.incrementAndGet() <= PAD_FLOOR_LIMIT) {
+                    Log.i(
+                        "Single-hand gap floor $label: left,right=$left,$right -> $outLeft,$outRight" +
+                            " floor=$floor | q[${paddingFields(currentPaddingModel())}]"
+                    )
+                }
+            }
+            args[ADJUST_LEFT_INDEX] = outLeft
+            args[ADJUST_RIGHT_INDEX] = outRight
             rememberMargins(left, right)
-            reportMargin(label, left, right, left, right, false, MARGIN_SIDE_NONE, false, false,
+            reportMargin(label, left, right, outLeft, outRight,
+                outLeft != left || outRight != right, MARGIN_SIDE_NONE, false, false,
                 split, hand)
             return
         }
@@ -931,7 +1516,15 @@ internal object WeTypeLayoutHooks {
         runCatching {
             setter.isAccessible = true
             setter.hookAfter { param ->
-                if (param.args?.firstOrNull() != true) return@hookAfter
+                val enabled = param.args?.firstOrNull() == true
+                val trace = "$label=$enabled caller=${callerHint()}"
+                if (trace != lastSetterTrace) {
+                    lastSetterTrace = trace
+                    if (setterReportCount.incrementAndGet() <= SETTER_REPORT_LIMIT) {
+                        Log.i("Setter: $trace")
+                    }
+                }
+                if (!enabled) return@hookAfter
                 onEnabled()
                 if (exclusionReportCount.incrementAndGet() <= EXCLUSION_REPORT_LIMIT) {
                     Log.i("Exclusion: $label enabled -> the other mode was cleared")
@@ -1013,7 +1606,9 @@ internal object WeTypeLayoutHooks {
                         candidate.returnType == PRIMITIVE_INT
                 }?.apply { isAccessible = true } ?: return@forEach
                 method.hookAfter { param ->
-                    foldGateBypass.set(false)
+                    // No `foldGateBypass` reset here. These getters are read from inside `k2()`,
+                    // so clearing the flag from a bystander is exactly what made the bypass
+                    // unreliable; the gate hook owns the whole window.
                     if (paddingReportCount.incrementAndGet() <= 24) {
                         Log.i(
                             "Keyboard padding: Q.$name() = ${param.result}" +
@@ -1061,6 +1656,9 @@ internal object WeTypeLayoutHooks {
         hookPaddingWriters()
         hookPaddingRecords()
         hookAdjustPanelPreview()
+        hookAdjustCommitGate()
+        hookAdjustEdgeFloor()
+        hookAdjustSplitEdgeFloor()
     }
 
     /** Instruments the one method that turns `model.Q` into panel geometry on both panel variants. */
@@ -1111,11 +1709,22 @@ internal object WeTypeLayoutHooks {
     }
 
     /**
-     * Records which `a7.b` field each padding setter actually lands in.
+     * Records which `a7.b` field each padding setter actually lands in, and enforces the floor that
+     * keeps the single-hand controls their own patch of panel.
      *
      * `o()` / `p()` pick between `f`/`g`, `h`/`i` and `k`/`l` at call time, so a value can reach the
      * model and still be invisible to a reader that lands on a different branch. Logging the written
      * value next to what the matching getter reads back removes that whole class of doubt.
+     *
+     * `o()` is the leading side (`k` split / **`h` single-hand** / `f` merged) and `p()` the trailing
+     * one (`l` / **`i`** / `g`).
+     *
+     * **[CORRECTION 2026-09-21]** An earlier revision also clamped the *argument* here to a hard
+     * `205px`. On device that never produced a clean stop: these setters run several times per frame,
+     * the host re-issued the value it wanted each time (four consecutive `Q.o(31) -> 205` pairs), and
+     * the mode still ended up being switched off - because the host decides that from the arguments
+     * reaching `Mgr.x(...)`, not from what is later stored in the model. The floor now lives at that
+     * single entry point instead; see [applyMarginSync]. This hook is read-only again.
      */
     private fun hookPaddingWriters() {
         runCatching {
@@ -1448,6 +2057,536 @@ internal object WeTypeLayoutHooks {
 
     // --------------------------------------------------------------- single-hand mode
 
+    /**
+     * Instruments `adjust.ImeKeyboardResetView`, the pill that carries the move / reset / size
+     * buttons.
+     *
+     * `e(show, isAdjust)` is the only display entry point, and the host picks the side inside it:
+     * ```
+     * left = Q.j(); right = Q.l();
+     * if (left > right) f(...) else g(...)                 // f -> left copy, g -> right copy
+     * if (m1.X1()) q3(this, null, m1.z1(t0(), 1, null))    // unfolded: pin the pill's width
+     * ```
+     * Logging the arguments next to the laid-out geometry separates a wrong *side* from a wrong
+     * *width* - two failures that look identical on screen.
+     */
+    private fun hookKeyboardResetView() {
+        runCatching {
+            val owner = loadClassOrNull(RESET_VIEW) ?: error("Failed to resolve $RESET_VIEW")
+            hookResetViewCompanion()
+            hookResetViewCopy(owner)
+            hookPillWidthSetter()
+            val show = owner.declaredMethods.firstOrNull { candidate ->
+                candidate.name == RESET_VIEW_SHOW &&
+                    candidate.parameterTypes.size == 2 &&
+                    candidate.parameterTypes[0] == PRIMITIVE_BOOLEAN &&
+                    candidate.parameterTypes[1] == PRIMITIVE_BOOLEAN &&
+                    candidate.returnType == PRIMITIVE_VOID
+            }?.apply { isAccessible = true }
+                ?: error("No $RESET_VIEW.$RESET_VIEW_SHOW(ZZ)")
+
+            show.hookAfter { param ->
+                val view = param.thisObject as? android.view.View ?: return@hookAfter
+                if (resetViewReportCount.incrementAndGet() <= RESET_PILL_CALL_LIMIT) {
+                    Log.i(pillLine("show", view, param.args))
+                }
+                watchResetViewLayout(view)
+            }
+            Log.i("Success: Probe single-hand action pill via $RESET_VIEW.$RESET_VIEW_SHOW()")
+        }.onFailure { error ->
+            Log.i("Failed: Probe single-hand action pill via $RESET_VIEW")
+            Log.i(error)
+        }
+    }
+
+    /**
+     * Pins the pill's contents to the outer edge, at `m1.q3` - the one call that sizes them.
+     *
+     * **The complaint this answers.** In single-hand mode the keyboard docks to one side and the
+     * pill covers the whole keyboard row (2364px here). The three-affordance column is *supposed*
+     * to sit on the opposite outer edge - `ime_keyboard_reset_view_layout.xml` declares
+     * `alignParentEnd` on both right-hand copies and `wrap_content` widths, and that is what the
+     * host's own anchor logic does with them.
+     *
+     * What actually happens is that `f(ZZ)` / `g(ZZ)` hand every part of the tree the width of the
+     * *freed* strip instead of letting it wrap:
+     * ```
+     * q3(row,  height = Q.d - scaled + Q.e, width = Q.j())     // the row
+     * q3(cell, null,                        width = max(j,l))  // each button cell
+     * ```
+     * The cells centre their icon and label horizontally, so the whole column ends up centred in
+     * the strip rather than pinned to its edge. On a phone the strip is ~40% of the width and the
+     * result reads as "on the empty side"; on an unfolded inner screen the strip is 1351px wide and
+     * the column floats in the middle of the screen instead.
+     *
+     * **The fix.** Rewrite the width argument to `null`. `q3` guards every assignment with
+     * `if (width != null)`, so a null width means "leave it alone" and the view keeps the
+     * `wrap_content` its layout declares - after which the host's own `alignParentEnd` does the
+     * right thing. Nothing else is touched: the heights the host computes are load-bearing (they
+     * are the row's laid-out height and the cells' weighted shares), and the pill itself is
+     * excluded, because its full width *is* correct.
+     *
+     * **Scoped to the unfolded screen.** Gated on the host's own `m1.X1()`, the same predicate that
+     * decides whether the host widens the pill at all. On the outer screen the host does not, the
+     * strip already sits where the phone build wants it, and correcting it there would have moved
+     * chrome nobody asked about. Reported after the first attempt did exactly that.
+     *
+     * Also logs the clamp, so a regression shows up as a missing line rather than as a mysterious
+     * layout change.
+     */
+    private fun hookPillWidthSetter() {
+        runCatching {
+            val owner = loadClassOrNull(M1) ?: error("Failed to resolve $M1")
+            val setter = owner.declaredMethods.firstOrNull { candidate ->
+                candidate.name == PILL_WIDTH_SETTER &&
+                    candidate.parameterTypes.size == 3 &&
+                    candidate.parameterTypes[0] == android.view.View::class.java
+            }?.apply { isAccessible = true }
+                ?: error("No $M1.$PILL_WIDTH_SETTER(View, Integer, Integer)")
+
+            setter.hookBefore { param ->
+                val view = param.args?.getOrNull(0) as? android.view.View ?: return@hookBefore
+                if (!isInsideResetPill(view)) return@hookBefore
+                val width = param.args.getOrNull(2)
+                val unfolded = unfoldedScreen()
+                // Unfolded only. On the outer screen the host skips its own width pinning and the
+                // strip already sits where the phone build wants it - clamping there would move
+                // chrome the user never complained about, so the whole fix is scoped to the wide
+                // screen it was reported on.
+                val pin = HookSettings.unlockSingleHandMode && unfolded
+                pillPinActive = pin
+                if (pillWidthCount.incrementAndGet() <= PILL_WIDTH_LIMIT) {
+                    Log.i(
+                        "Pill width clamped: h=${param.args.getOrNull(1)} w=$width" +
+                            " -> ${if (pin) "wrap_content" else "unchanged"}" +
+                            " unfolded=$unfolded class=${view.javaClass.simpleName}"
+                            + " parent=${(view.parent as? android.view.View)?.javaClass?.simpleName}"
+                    )
+                }
+                if (!pin) return@hookBefore
+                // `q3` skips a null width, so the row / cell keeps the `wrap_content` that
+                // `ime_keyboard_reset_view_layout.xml` declares for it - and the host's own
+                // `alignParentEnd` then pins it to the outer edge instead of the middle of the gap.
+                param.args[2] = null
+            }
+            Log.i("Success: Probe pill width setter via $M1.$PILL_WIDTH_SETTER()")
+        }.onFailure { error ->
+            Log.i("Failed: Probe pill width setter via $M1.$PILL_WIDTH_SETTER()")
+            Log.i(error)
+        }
+    }
+
+    /**
+     * Keeps the move / reset / size strip showing its three buttons instead of folding down to a
+     * three-dot icon.
+     *
+     * **The complaint this answers.** The strip folds into a single `left_more_iv` / `right_more_iv`
+     * dot icon inside `<side>_adjust_simple_ll` - and once folded it never comes back: the `onTouch`
+     * branch for that icon sets `z = false` and then calls `f(0,0)` / `g(0,0)`, which is the same
+     * fold again. The strip is a dead end after the first fold, which is exactly what the report
+     * described ("the three dots on the right do nothing").
+     *
+     * The fold is decided in `f(ZZ)` / `g(ZZ)` and nowhere else - see
+     * [RESET_VIEW_SHOW_SIMPLE_FLAG] for the condition. Both inputs have several writers (`z`:
+     * `onTouch`'s move-handle drag, `onTouch`'s dot tap, `float.f.S()`, `ImeRootView`,
+     * `WxHldService`, the pill's own `i()`; `A`: any handle press), so no single upstream value is
+     * worth pinning.
+     *
+     * **Why the correction sits in `hookAfter` and not in the arguments.** 1.0.18-alpha registered
+     * the forced expansion as a second `hookBefore` on these same two methods, and the run produced
+     * not one line from it while this `hookAfter` reported normally - so the argument route is not
+     * the dependable one here. Rewriting the *result* is: the host's own branch runs first, then
+     * the three-button container of the side that branch chose is shown and its dot icon hidden.
+     * The two flags are reset as well, so the host's next pass picks the expanded branch by itself
+     * instead of relying on the correction.
+     *
+     * **Scoped to single-hand mode.** The first revision applied this unconditionally, on the
+     * reasoning that the fold is a dead end in the plain keyboard-adjust panel too and that `e(ZZ)`
+     * already gates the whole pill on `i1.k2()`. On device that turned out to be wrong: the strip is
+     * also built for the two-handed boards, and the forced expansion reached them, which is the
+     * 「三个按钮常驻是指在单手模式常驻，不要放进分体键盘、合体键盘」 correction. Both `f` and `g` now
+     * return early unless the host itself reports one-handed mode, so every other board keeps the
+     * host's own fold behaviour untouched.
+     */
+    private fun hookResetViewCopy(owner: Class<*>) {
+        listOf(RESET_VIEW_LEFT_COPY, RESET_VIEW_RIGHT_COPY).forEach { name ->
+            val left = name == RESET_VIEW_LEFT_COPY
+            val method = owner.declaredMethods.firstOrNull { candidate ->
+                candidate.name == name &&
+                    candidate.parameterTypes.size == 2 &&
+                    candidate.parameterTypes[0] == PRIMITIVE_BOOLEAN &&
+                    candidate.parameterTypes[1] == PRIMITIVE_BOOLEAN
+            }?.apply { isAccessible = true } ?: return@forEach
+
+            method.hookAfter { param ->
+                val view = param.thisObject as? android.view.View ?: return@hookAfter
+
+                // Only one-handed mode is asked to keep the three buttons out. `f` / `g` are the
+                // strip's *own* fold decision and they run for every board the host builds, so
+                // forcing them unguarded is how the three buttons turned up on the two-handed board
+                // as well. Measured on device, the strip is drawn whenever the host thinks
+                // one-handed mode is on (`i1.k2()`), so gating on exactly that leaves the two-handed
+                // boards with the host's own behaviour - dots when it wants dots - and nothing else
+                // changes. The user's wording (2026-09-21): 「三个按钮常驻是指在单手模式常驻，不要放进
+                // 分体键盘、合体键盘」.
+                if (!singleHandActive()) {
+                    if (resetViewCopyCount.incrementAndGet() <= RESET_PILL_COPY_LIMIT) {
+                        Log.i(pillLine("copy:$name", view, param.args))
+                    }
+                    watchResetViewLayout(view)
+                    return@hookAfter
+                }
+
+                val forced = forceStripButtons(view, left)
+                pinStripFlags(owner)
+                val line = "Strip $name: $forced pins=${stripFlagState()}" +
+                    " kids[${pillChildren(view)}]"
+                if (line != lastStripLine) {
+                    lastStripLine = line
+                    if (stripForceCount.incrementAndGet() <= STRIP_FORCE_REPORT_LIMIT) {
+                        Log.i(line)
+                    }
+                }
+                if (resetViewCopyCount.incrementAndGet() <= RESET_PILL_COPY_LIMIT) {
+                    Log.i(pillLine("copy:$name", view, param.args))
+                }
+                watchResetViewLayout(view)
+            }
+        }
+    }
+
+    /**
+     * Shows the three-button container of one side and hides the three-dot icon beside it.
+     *
+     * Addressed by resource entry name - `keyboard_adjust_left_rl` / `keyboard_adjust_right_rl`
+     * for the buttons, `keyboard_adjust_left_simple_ll` / `keyboard_adjust_right_simple_ll` for the
+     * dots - and by the `<merge>` order as a fallback, because the name lookup is the only part of
+     * this that can come back empty.
+     *
+     * `<merge>` inflates straight into the pill, so the fallback order is the one the layout
+     * declares: `[0] keyboard_adjust_left_simple_ll`, `[1] keyboard_adjust_left_rl`,
+     * `[2] keyboard_adjust_right_simple_ll`, `[3] keyboard_adjust_right_rl`. Only the `_rl` row of
+     * one side is ever shown; `_simple_ll` is the collapsed form, and it is also where the
+     * `left_more_iv` / `right_more_iv` dot icon lives.
+     */
+    private fun forceStripButtons(pill: android.view.View, left: Boolean): String {
+        val group = pill as? android.view.ViewGroup ?: return "no-group"
+        val side = if (left) "left" else "right"
+        var buttons: android.view.View? = null
+        var dots: android.view.View? = null
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index) ?: continue
+            when (childEntryName(child)) {
+                "keyboard_adjust_${side}_rl" -> buttons = child
+                "keyboard_adjust_${side}_simple_ll" -> dots = child
+            }
+        }
+        val byName = buttons != null && dots != null
+        if (!byName) {
+            val base = if (left) 0 else 2
+            if (dots == null) dots = group.getChildAt(base)
+            if (buttons == null) buttons = group.getChildAt(base + 1)
+        }
+        buttons?.visibility = android.view.View.VISIBLE
+        dots?.visibility = android.view.View.GONE
+        return "$side byName=$byName buttons=vis${buttons?.visibility} dots=vis${dots?.visibility}"
+    }
+
+    /** The pill child's resource entry name, e.g. `keyboard_adjust_left_rl`; `null` when absent. */
+    private fun childEntryName(child: android.view.View): String? = runCatching {
+        val id = child.id
+        if (id == 0) null else child.resources.getResourceEntryName(id)
+    }.getOrNull()
+
+    /**
+     * Puts the pill's two fold flags back to what its own `<clinit>` starts with.
+     *
+     * `z` starts `true` (expanded) and `A` starts `false` (no handle pressed); between them they
+     * are the whole of the fold decision. Resolved once, from inside a live `f` / `g` call.
+     */
+    private fun pinStripFlags(owner: Class<*>) {
+        if (!resetViewFlagsResolved) {
+            resetViewFlagsResolved = true
+            resetViewShowSimpleField = staticFieldOrNull(owner, RESET_VIEW_SHOW_SIMPLE_FLAG)
+            resetViewTouchedField = staticFieldOrNull(owner, RESET_VIEW_TOUCHED_FLAG)
+        }
+        resetViewShowSimpleField?.let { field ->
+            runCatching { if (!field.getBoolean(null)) field.setBoolean(null, true) }
+        }
+        resetViewTouchedField?.let { field ->
+            runCatching { if (field.getBoolean(null)) field.setBoolean(null, false) }
+        }
+    }
+
+    private fun staticFieldOrNull(owner: Class<*>, name: String): java.lang.reflect.Field? =
+        runCatching { owner.getDeclaredField(name).apply { isAccessible = true } }.getOrNull()
+
+    /** `z` / `A` as they stand after [pinStripFlags]; `?` when the field could not be resolved. */
+    private fun stripFlagState(): String {
+        val showSimple = resetViewShowSimpleField?.let { field ->
+            runCatching { field.getBoolean(null) }.getOrNull()
+        }
+        val touched = resetViewTouchedField?.let { field ->
+            runCatching { field.getBoolean(null) }.getOrNull()
+        }
+        return "showSimple=$showSimple touched=$touched"
+    }
+
+    /**
+     * One line carrying everything that separates a wrong anchor from a wrong width.
+     *
+     * `getLocationOnScreen` is the ground truth and `view.x` is not: the latter is relative to the
+     * parent, so a view can read `x=0` while sitting a thousand pixels into the screen.
+     */
+    private fun pillLine(tag: String, view: android.view.View, args: Array<Any?>?): String {
+        val screen = IntArray(2)
+        runCatching { view.getLocationOnScreen(screen) }
+        val parent = view.parent as? android.view.View
+        return "Reset pill [$tag]: args=$args vis=${view.visibility}" +
+            " self=${view.width}x${view.height}@(${view.x},${view.y})" +
+            " screen=(${screen[0]},${screen[1]}) lp=${view.layoutParams}" +
+            " parent=${parent?.javaClass?.simpleName} pw=${parent?.width} px=${parent?.x}" +
+            " chain[${viewChain(view)}]" +
+            " kids[${pillChildren(view)}]" +
+            " | q[${paddingFields(currentPaddingModel())}]"
+    }
+
+    /** `class(width@x,y)` from the pill up to the window root, so the containing box is visible. */
+    private fun viewChain(view: android.view.View): String {
+        val parts = mutableListOf<String>()
+        var node: android.view.View? = view
+        var depth = 0
+        while (node != null && depth < VIEW_CHAIN_DEPTH) {
+            val screen = IntArray(2)
+            runCatching { node.getLocationOnScreen(screen) }
+            parts += "${node.javaClass.simpleName}(${node.width}@${screen[0]},${screen[1]})"
+            node = node.parent as? android.view.View
+            depth++
+        }
+        return parts.joinToString(" < ")
+    }
+
+    /** `#i name vis wxh@x,y` for each stacked child of the pill; the name is its resource entry. */
+    private fun pillChildren(view: android.view.View): String {
+        val group = view as? android.view.ViewGroup ?: return "n/a"
+        return (0 until minOf(group.childCount, VIEW_TREE_CHILDREN)).joinToString(",") { index ->
+            val child = group.getChildAt(index)
+            "#$index ${childEntryName(child) ?: child.javaClass.simpleName} vis=${child.visibility}" +
+                " ${child.width}x${child.height}@(${child.x},${child.y})"
+        }
+    }
+
+    /**
+     * Captures the pill instance from its companion as a second, independent way in.
+     *
+     * Kept as a fallback rather than the primary route. `e(ZZ)` was once written off as never firing
+     * on 3.5.3 because not one `Reset pill:` line followed the install-time registration line - but
+     * that was the probe's own doing: the display hook and the layout dump shared a single counter,
+     * the dump spent it within a couple of frames, and the display hook then stayed silent while the
+     * pill was plainly on screen. With the budgets split, `e(ZZ)` reports every show. The companion
+     * still earns its place, because a keyboard scene that reveals the pill without going through
+     * `e(ZZ)` would otherwise stay invisible to the probe.
+     */
+    private fun hookResetViewCompanion() {
+        runCatching {
+            val companion = loadClassOrNull(RESET_VIEW_COMPANION)
+                ?: error("Failed to resolve $RESET_VIEW_COMPANION")
+            val toggle = companion.declaredMethods.firstOrNull { candidate ->
+                candidate.name == RESET_VIEW_TOGGLE &&
+                    candidate.parameterTypes.size == 1 &&
+                    candidate.parameterTypes[0] == PRIMITIVE_BOOLEAN
+            }?.apply { isAccessible = true }
+                ?: error("No $RESET_VIEW_COMPANION.$RESET_VIEW_TOGGLE(Z)")
+
+            // The pill's constructor is not reachable here: `declaredConstructors` yields
+            // `Constructor`, while this hook API only provides `Method.hookAfter`. The companion's
+            // show / hide entry point is an ordinary instance method and holds the instance in its
+            // synthetic `this$0`, so the view is recovered from the callback instead.
+            toggle.hookAfter { param ->
+                val host = param.thisObject ?: return@hookAfter
+                val view = runCatching {
+                    host.javaClass.getDeclaredField(RESET_VIEW_HOST_FIELD)
+                        .apply { isAccessible = true }
+                        .get(host) as? android.view.View
+                }.getOrNull() ?: return@hookAfter
+                watchResetViewLayout(view)
+            }
+            Log.i("Success: Probe single-hand action pill toggle via $RESET_VIEW_COMPANION.$RESET_VIEW_TOGGLE()")
+        }.onFailure { error ->
+            Log.i("Failed: Probe single-hand action pill toggle")
+            Log.i(error)
+        }
+    }
+
+    /**
+     * Registers the one-shot geometry dump for the pill.
+     *
+     * Deliberately *not* inlined at the hook site: with a SAM conversion nested inside the
+     * `hookAfter { }` lambda the compiler resolves `addOnGlobalLayoutListener` against the hook API
+     * and fails with "receiver type mismatch" on this very call. A plain method has no such
+     * competing receiver.
+     */
+    /**
+     * Registers the geometry dump for the pill, on the first call that can bind it.
+     *
+     * Two mechanisms, because neither alone is enough: `post` covers the common case where the host
+     * reveals the pill *before* it is attached (the bounds are still zero then), and
+     * `addOnLayoutChangeListener` covers the reverse. The listener is the load-bearing one - it is
+     * the only callback that survives a view that is populated after the fact.
+     *
+     * The listener is an explicit object rather than a lambda: with a SAM conversion nested inside
+     * a `hookAfter { }` body the compiler resolves the call against the hook API instead and fails
+     * with "receiver type mismatch". This method has no such competing receiver, but keeping the
+     * shape explicit means the same mistake cannot come back.
+     */
+    private fun watchResetViewLayout(view: android.view.View) {
+        if (!resetViewBound.compareAndSet(false, true)) return
+        val dump = Runnable { reportResetViewLayout(view) }
+        if (view.width > 0) dump.run() else view.post(dump)
+        view.addOnLayoutChangeListener(
+            object : android.view.View.OnLayoutChangeListener {
+                override fun onLayoutChange(
+                    changed: android.view.View,
+                    left: Int,
+                    top: Int,
+                    right: Int,
+                    bottom: Int,
+                    oldLeft: Int,
+                    oldTop: Int,
+                    oldRight: Int,
+                    oldBottom: Int,
+                ) {
+                    if (right - left <= 0) return
+                    if (pillPinActive) {
+                        (changed as? android.view.ViewGroup)?.let { pinResetPillWidths(it) }
+                    }
+                    reportResetViewLayout(changed)
+                }
+            }
+        )
+    }
+
+    /**
+     * `m1.X1()` - the host's own unfolded / wide-screen test.
+     *
+     * The same predicate the host uses to decide whether to pin the pill's width at all, so it is
+     * the right gate for the pin: where the host does not widen anything, nothing has drifted and
+     * nothing should be corrected. Read live rather than cached, because folding changes the answer
+     * mid-session. Safe to call from a hook body - the module's own bypass of this method is only
+     * armed inside `k2()` / `Y2()`.
+     */
+    private fun unfoldedScreen(): Boolean = callM1("X1") as? Boolean ?: false
+
+    /** True when `view` is a row of the pill or a cell inside one - never the pill itself. */
+    private fun isInsideResetPill(view: android.view.View): Boolean {
+        var parent: android.view.ViewParent? = view.parent
+        var depth = 0
+        while (parent is android.view.View && depth < PILL_DESCENT_DEPTH) {
+            if (parent.javaClass.name == RESET_VIEW) return true
+            parent = parent.parent
+            depth++
+        }
+        return false
+    }
+
+    /**
+     * The host's own one-handed cut-off, in pixels - `m1.m0(130)`.
+     *
+     * `Mgr.x(...)` compares `max(left, right)` against this same call before it switches the mode
+     * off, so reading it back rather than hard-coding a number is what keeps the floor and the
+     * switch-over in lockstep on any density or screen width.
+     *
+     * Returns `0` when the helper cannot be reached, and callers treat that as "no floor" - a missing
+     * number must never be turned into a silent zero-pixel gap.
+     */
+    private fun singleHandGapFloor(): Int =
+        (callM1(DP_TO_PX, SINGLE_HAND_GAP_FLOOR_DP) as? Int)?.coerceAtLeast(0) ?: 0
+
+    /**
+     * Backstop for [hookPillWidthSetter]: wraps the pill's rows to their content and gives them
+     * [RESET_PILL_EDGE_INSET_DP] of breathing room from the edge they are anchored to.
+     *
+     * The clamp on `q3` only catches the widths the host routes through that helper. A width written
+     * straight onto `layoutParams` would slip past it, and the strip is long enough that
+     * `alignParentEnd` alone cannot be trusted to hide the difference. Runs at layout time, where
+     * the values are already in place.
+     *
+     * Idempotent by construction, which is what keeps it out of a layout loop: both writers bail out
+     * when the value is already correct, so the re-layout they trigger comes back to a subtree that
+     * needs nothing and stops there.
+     *
+     * Only active while [pillPinActive] holds, which is latched per `q3` call and therefore carries
+     * the unfolded-screen gate with it.
+     */
+    private fun pinResetPillWidths(pill: android.view.ViewGroup) {
+        val inset = edgeInsetPx(pill)
+        for (index in 0 until pill.childCount) {
+            val row = pill.getChildAt(index)
+            pinRowToEdge(row, inset)
+            val rowGroup = row as? android.view.ViewGroup ?: continue
+            for (cellIndex in 0 until rowGroup.childCount) {
+                // Only containers get unwrapped. A cell of the expanded row is a `RelativeLayout`
+                // holding an icon *and* a caption, and the host hands it the whole blank-strip width;
+                // wrapping it is what lets the pair sit against the edge. A cell of the collapsed row
+                // is the icon itself, sized by `@dimen/ime_adjust_reset_button_direction_width_height`
+                // (80px). Wrapping *that* drops it to the drawable's intrinsic size - measured at
+                // 28px on device - which shrinks the chevron to a sliver. Leave leaf views alone.
+                val cell = rowGroup.getChildAt(cellIndex)
+                if (cell is android.view.ViewGroup) rewriteToWrapContent(cell)
+            }
+        }
+    }
+
+    /**
+     * Wraps a row to its content and insets it from whichever edge it is anchored to.
+     *
+     * Both margins are set because the anchor differs per row - the right-hand copies declare
+     * `alignParentEnd`, the left-hand ones declare no horizontal rule at all and land on the start
+     * edge. A margin on the unused side is inert for a `wrap_content` row, so setting both keeps
+     * this branch-free.
+     */
+    private fun pinRowToEdge(view: android.view.View, inset: Int) {
+        val params = view.layoutParams as? android.view.ViewGroup.MarginLayoutParams ?: return
+        if (params.width == android.view.ViewGroup.LayoutParams.WRAP_CONTENT &&
+            params.marginStart == inset && params.marginEnd == inset
+        ) {
+            return
+        }
+        params.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+        params.marginStart = inset
+        params.marginEnd = inset
+        view.layoutParams = params
+    }
+
+    /** [RESET_PILL_EDGE_INSET_DP] in pixels, resolved per view so a density change is honoured. */
+    private fun edgeInsetPx(view: android.view.View): Int = runCatching {
+        (RESET_PILL_EDGE_INSET_DP * view.resources.displayMetrics.density).toInt()
+    }.getOrDefault(0)
+
+    private fun rewriteToWrapContent(view: android.view.View) {
+        val params = view.layoutParams as? android.view.ViewGroup.MarginLayoutParams ?: return
+        if (params.width == android.view.ViewGroup.LayoutParams.WRAP_CONTENT) return
+        params.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+        view.layoutParams = params
+    }
+
+    /** The laid-out report: one geometry line plus the subtree. Budgeted, then silent. */
+    private fun reportResetViewLayout(view: android.view.View) {
+        if (resetViewTreeCount.incrementAndGet() > RESET_PILL_TREE_LIMIT) return
+        Log.i(pillLine("laid-out", view, null))
+        Log.i("Reset pill tree:${viewTree(view)}")
+    }
+
+    /** The live `model.Q` instance, read from `m1.H0()` at call time (never at install time). */
+    private fun currentPaddingModel(): Any? = runCatching {
+        val cls = loadClassOrNull(M1) ?: return@runCatching null
+        val instance = cls.getDeclaredField("a").apply { isAccessible = true }.get(null)
+            ?: return@runCatching null
+        cls.declaredMethods.firstOrNull {
+            it.name == "H0" && it.parameterTypes.size == 3
+        }?.apply { isAccessible = true }?.invoke(instance, null, 1, null)
+    }.getOrNull()
+
     private fun hookSingleHandModeGate() {
         hookFoldGate()
 
@@ -1477,11 +2616,17 @@ internal object WeTypeLayoutHooks {
                     // last one is the user's own `ime_enable_single_hand_mode`; overriding it would
                     // make the in-keyboard toggle one-way (it could turn the mode on but never
                     // off). Bypassing the fold gate is enough - the user's setting decides the rest.
-                    if (gateReportCount.incrementAndGet() <= 6) {
-                        Log.i(
-                            "Single-hand gate: $SETTINGS.$methodName() = ${param.result}"
-                                + " | " + singleHandTrace()
-                        )
+                    // One line per *distinct* state, not per call: the gate is evaluated on every
+                    // keyboard layout pass, and the first six calls all land during start-up, when
+                    // the user's own setting has not been read yet. Keying on the trace is what
+                    // keeps the interesting transition (the setting turning on) inside the budget.
+                    val trace = singleHandTrace()
+                    val seen = "$methodName=${param.result} $trace"
+                    if (seen != lastGateTrace) {
+                        lastGateTrace = seen
+                        if (gateReportCount.incrementAndGet() <= GATE_TRACE_LIMIT) {
+                            Log.i("Single-hand gate: $SETTINGS.$methodName() = ${param.result} | $trace")
+                        }
                     }
                 }
                 Log.i("Success: Unlock WeType single-hand mode via $SETTINGS.$methodName()")
@@ -1500,8 +2645,12 @@ internal object WeTypeLayoutHooks {
     private fun singleHandTrace(): String = runCatching {
         val kind = callOnSingleton(KEYBOARD_MODEL, "a", "t0")
         val typeOk = if (kind == null) null else callOnSingleton(KEYBOARD_MODEL, "a", "O1", kind)
+        // The fourth condition and the bypass flag, so a report names *which* condition closed
+        // the gate instead of only that it was closed.
+        val userOn = callOnSingleton(SETTINGS, "a", SINGLE_HAND_SETTING_READ, SINGLE_HAND_SETTING, false)
         "floating=${callOnSingleton(FLOAT_SINGLETON, "a", "V")} kind=$kind typeOk=$typeOk" +
-            " sceneE=${keyboardSceneId("e")} sceneJ=${keyboardSceneId("j")}"
+            " sceneE=${keyboardSceneId("e")} sceneJ=${keyboardSceneId("j")}" +
+            " userOn=$userOn bypass=${foldGateBypass.get()}"
     }.getOrElse { "trace failed: $it" }
 
     private fun keyboardSceneId(field: String): Any? = runCatching {
@@ -1546,10 +2695,17 @@ internal object WeTypeLayoutHooks {
             }?.apply { isAccessible = true }
                 ?: throw NoSuchMethodException("$M1#X1()")
 
+            // Scope semantics - deliberately *not* consume-once.
+            //
+            // `k2()` evaluates this as the *third* of four conditions, and the two ahead of it
+            // (`float.f.V()` and `N.t0()/O1()`) can reach this same method on their own. A
+            // consume-once flag is therefore spent before the condition that needs it runs: the
+            // real `true` survives, `!X1()` collapses to false, and `k2()` stays false no matter
+            // what the user's own switch says. The window is opened by the `k2()` / `Y2()`
+            // before-hook and closed by that same hook's after-hook, so this body must leave the
+            // flag alone and only answer the question it was asked.
             foldGateMethod.hookBefore { param ->
-                if (foldGateBypass.get() != true) return@hookBefore
-                foldGateBypass.set(false)
-                param.result = false
+                if (foldGateBypass.get()) param.result = false
             }
             Log.i("Success: Bypass WeType unfolded-screen gate via $M1.X1()")
         }.onFailure { error ->
