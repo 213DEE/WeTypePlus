@@ -49,7 +49,7 @@
 
 宿主的布局逻辑跑在独立的 `:hld` 进程里，装完模块**必须重启一次微信输入法**，否则那个进程里没有模块。
 
-其他机型 / 系统版本未验证。宿主换版后若内部方法改名，对应功能会静默失效（不会崩），见[失败即降级](#它是怎么做的)。
+其他机型 / 系统版本未验证。宿主换版后若内部方法改名，对应功能会静默失效（不会崩，也不会把输入法搞挂）。
 
 ### 安装
 
@@ -61,64 +61,6 @@
 6. 打开模块的设置页按需开关。
 
 > 如果你之前装过 `com.xposed.wetypehook` 这个旧模块，**请先把它关掉**——两个模块 hook 同一批方法，同时开启会重复 hook。
-
-### 构建
-
-需要 JDK 21 + Android SDK（compileSdk 37）。
-
-```bash
-echo "sdk.dir=/path/to/android-sdk" > local.properties
-./gradlew :app:assembleRelease
-```
-
-产物：`app/build/outputs/apk/release/WeTypePlus-<version>_release.apk`（未签名）
-
-```bash
-zipalign -f -p 4 WeTypePlus-<version>_release.apk aligned.apk
-apksigner sign --ks your.jks --out WeTypePlus-<version>-signed.apk aligned.apk
-```
-
-### 它是怎么做的
-
-**只 hook 方法，不改宿主 APK，不重打包，不碰签名。**
-
-- **不写死尺寸。** 宽度链路里所有尺寸都乘同一个缩放系数，本模块改的是这个系数，所以整条链路的**上限**一起抬高，而调节滑块的全部行程保留。
-- **不读宿主静态字段。** 解析宿主类一律用 `Class.forName(name, false, …)`（不触发 `<clinit>`）。宿主的静态初始化依赖已 attach 的 `Application`，在安装 hook 的阶段触发它会**让输入法进程启动即崩溃**。hook **方法**本身是安全的。
-- **失败即降级。** 每个 hook 入口都是 fail-closed：宿主将来改名或改结构，对应功能变成「未生效」，不会把输入法搞崩。
-
-**两个进程，一条正规通道。** 模块需要把开关送进微信输入法进程里运行的 hook。跨进程读私有目录行不通（uid 不同），所以本项目用的是一个**导出的 `ContentProvider`**：
-
-```
-[模块 App 进程]                          [微信输入法进程]
-  MainActivity                             WeTypeLayoutHooks
-      │ 写                                     │ 读（1 秒缓存）
-      ▼                                        ▼
-  SharedPreferences  ──►  SettingsProvider  ──►  content://cn.dsr213.wetypeplus.settings
-```
-
-于是设置界面是一个**普通 App 的普通 Activity**——不需要把 UI 注入宿主、不需要共享文件。通道表面只有一个 `query`，返回一行两个 0/1。
-
-### 目录结构
-
-```
-app/src/main/
-├── java/cn/dsr213/wetypeplus/
-│   ├── ModuleEntry.kt            libxposed 入口（java_init.list 里注册的就是它）
-│   ├── KeyboardSettings.kt       开关的数据模型（App / Provider / Hook 三方共用）
-│   ├── AppSettings.kt            本 App 自己的持久化
-│   ├── bridge/
-│   │   ├── Bridge.kt             全项目唯一接触 libxposed 的文件
-│   │   └── SettingsProvider.kt   跨进程通道
-│   ├── hook/
-│   │   ├── WeTypeLayoutHooks.kt  真正干活的 hook（宿主逆向的成果都在这）
-│   │   └── HookSettings.kt       hook 侧只读缓存
-│   └── ui/
-│       ├── MainActivity.kt
-│       ├── SettingsScreen.kt     Miuix 设置页
-│       ├── SupportScreen.kt      打赏页
-│       └── HostRestart.kt
-└── resources/META-INF/xposed/    module.prop / scope.list / java_init.list
-```
 
 ### 日志
 
@@ -211,35 +153,6 @@ Other devices and OS versions are untested. If a future host build renames the i
 6. Open the module's settings and toggle what you need.
 
 > If you still have the older `com.xposed.wetypehook` module installed, **disable it first**. Both hook the same methods, and running them together double-hooks.
-
-### Build
-
-JDK 21 and an Android SDK with compileSdk 37.
-
-```bash
-echo "sdk.dir=/path/to/android-sdk" > local.properties
-./gradlew :app:assembleRelease
-zipalign -f -p 4 app/build/outputs/apk/release/WeTypePlus-<version>_release.apk aligned.apk
-apksigner sign --ks your.jks --out WeTypePlus-<version>-signed.apk aligned.apk
-```
-
-### How it works
-
-- **No hard-coded sizes.** The module raises the shared scale factor, so the whole chain's ceiling moves together and the adjuster keeps its full travel.
-- **No reads of host static fields.** Host classes are resolved with `Class.forName(name, false, …)` so `<clinit>` never runs. The host's static initialisation depends on an attached `Application`; triggering it while installing hooks **crashes the input method on startup**. Hooking *methods* is safe.
-- **Fail-closed.** Every hook bails out on mismatch, so a renamed host method disables one feature instead of crashing the keyboard.
-
-**Two processes, one legitimate channel.** The switches live in this app and are consumed inside WeType's process. Private storage is not readable across uids, so the transport is an exported `ContentProvider`:
-
-```
-[module app process]                     [WeType process]
-  MainActivity                             WeTypeLayoutHooks
-      │ write                                  │ read (1 s cache)
-      ▼                                        ▼
-  SharedPreferences  ──►  SettingsProvider  ──►  content://cn.dsr213.wetypeplus.settings
-```
-
-The settings screen is therefore an ordinary activity in an ordinary process. The provider exposes exactly one `query` returning one row of two 0/1 columns.
 
 ### Support
 
