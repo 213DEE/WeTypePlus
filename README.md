@@ -171,9 +171,12 @@ Failed: ...           某个 hook 没装上（不影响其他功能）
 
 ### What it is
 
-WeType (WeChat Input Method) lays its keyboard out for **phone portrait width**. On an unfolded foldable or in landscape it collapses into a narrow column with huge side margins. That is not a bug — it is a host-imposed ceiling: every width in the layout chain is multiplied by one scale factor, and that factor is derived from the phone's short edge.
+Take the **Xiaomi 18 Fold**. Unfold it and WeType's keyboard is **capped at a maximum width** — no matter how wide the screen gets, the keyboard stays a narrow column in the middle with large blank margins either side. That is not a bug; it is a host-imposed ceiling: every width in the layout chain is multiplied by one scale factor, and that factor is derived from the phone's short edge.
 
-This module raises that **ceiling**. It hard-codes no sizes, so WeType's own size adjuster still works, and 100% now means the full screen width instead of a phone-wide column.
+This module does the two things the host refuses to do:
+
+1. **Removes the keyboard's maximum-width cap.** It raises that ceiling and hard-codes no sizes, so WeType's own size adjuster still works and 100% means the full screen width instead of a phone-wide column.
+2. **Forces single-hand mode on.** The host disables single-hand mode outright on large screens (the check chain hard-codes "not unfolded"). The module switches it back on, so the single-hand keyboard is usable on an unfolded foldable too.
 
 **LSPosed module. No host APK modification, no repackaging, no signature changes — methods only.**
 
