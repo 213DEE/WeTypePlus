@@ -73,12 +73,17 @@
 
     <!-- 日志 -->
     <string name="section_log">日志</string>
-    <string name="log_desc">模块在微信输入法进程里写下的最近日志，早的在前面。刷新时会向运行中的模块要一份最新的，不需要 root。</string>
+    <string name="log_desc">模块在微信输入法进程里写下的最近日志，早的在前面。刷新时会向运行中的模块要一份最新的，不需要 root。「导出」会把日志和本机环境一起写成一份文件，直接发出去即可。</string>
     <string name="log_empty">还没收到任何上报。先打开一次微信输入法，再回来刷新。</string>
     <string name="log_refresh">刷新</string>
     <string name="log_copy">复制</string>
     <string name="log_copied">日志已复制</string>
     <string name="log_truncated">只显示最后 %1$d 行；复制会取全部。</string>
+    <string name="log_export">导出日志文件</string>
+    <string name="log_exporting">正在导出…</string>
+    <string name="log_exported">已存到 %1$s，接下来选个应用发出去。</string>
+    <string name="log_export_failed">导出失败</string>
+    <string name="log_share_title">把日志发给开发者</string>
 
     <!-- 关于 -->
     <string name="about_version">版本 %1$s</string>

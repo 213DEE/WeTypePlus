@@ -73,12 +73,17 @@
 
     <!-- Log -->
     <string name="section_log">Log</string>
-    <string name="log_desc">The module\'s own most recent lines from inside WeType, oldest first. Refreshing asks the running module for a fresh copy, so no root is needed.</string>
+    <string name="log_desc">The module\'s own most recent lines from inside WeType, oldest first. Refreshing asks the running module for a fresh copy, so no root is needed. Export writes them into one file together with this device\'s environment, ready to send.</string>
     <string name="log_empty">Nothing reported yet. Open WeType once, then come back and refresh.</string>
     <string name="log_refresh">Refresh</string>
     <string name="log_copy">Copy</string>
     <string name="log_copied">Log copied</string>
     <string name="log_truncated">Showing the last %1$d lines; Copy takes all of them.</string>
+    <string name="log_export">Export log file</string>
+    <string name="log_exporting">Exporting…</string>
+    <string name="log_exported">Saved to %1$s - now pick an app to send it with.</string>
+    <string name="log_export_failed">Could not export the log</string>
+    <string name="log_share_title">Send log to the developer</string>
 
     <!-- About -->
     <string name="about_version">Version %1$s</string>

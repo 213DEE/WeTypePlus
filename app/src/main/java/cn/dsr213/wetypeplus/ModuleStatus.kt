@@ -151,6 +151,26 @@ internal fun releaseSegment(version: String): String =
     version.split('.').take(3).joinToString(".")
 
 /**
+ * The framework's name, version, and the version code when the framework supplied one.
+ *
+ * The code is what a user can match against their own screen - LSPosed and KernelSU both write
+ * "LSPosed v2.2.0 (7854)" - so leaving it out made a correct reading look like a different build.
+ * A blank is reported as such (`null`) rather than dressed up: the web of guesses a wrong version
+ * invites is worse than an honest gap.
+ *
+ * Lives here rather than beside the screen because the exported report renders the same row with
+ * the same rules, and two renderings of one reading is how a screenshot and a report start
+ * disagreeing.
+ */
+internal fun frameworkText(status: ModuleStatus): String? {
+    val name = listOf(status.frameworkName, status.frameworkVersion)
+        .filter { part -> part.isNotBlank() }
+        .joinToString(" ")
+    if (name.isBlank()) return null
+    return if (status.frameworkVersionCode > 0L) "$name (${status.frameworkVersionCode})" else name
+}
+
+/**
  * Persists the module's last report.
  *
  * A plain private `SharedPreferences` file, written by [cn.dsr213.wetypeplus.bridge.BridgeReceiver]

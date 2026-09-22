@@ -35,7 +35,9 @@ import cn.dsr213.wetypeplus.EnvironmentProbe
 import cn.dsr213.wetypeplus.ModuleStatus
 import cn.dsr213.wetypeplus.ModuleStatusStore
 import cn.dsr213.wetypeplus.R
+import cn.dsr213.wetypeplus.ReportExport
 import cn.dsr213.wetypeplus.bridge.SettingsBridge
+import cn.dsr213.wetypeplus.frameworkText
 import cn.dsr213.wetypeplus.releaseSegment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -107,6 +109,7 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
     var status by remember { mutableStateOf(ModuleStatusStore.read(context)) }
     var refreshing by remember { mutableStateOf(false) }
     var refreshToken by remember { mutableStateOf(0) }
+    var exporting by remember { mutableStateOf(false) }
 
     // The screen's one refresh path, and it runs on open as well as on the button: what the module
     // did when WeType last started is history, and the question people actually arrive with is
@@ -478,6 +481,69 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                                     enabled = logLines.isNotEmpty()
                                 )
                             }
+                            // The one action a user with a problem actually needs: a single file
+                            // holding the log and the environment, ready to attach to a message.
+                            // Full width because it is the destination of this card, not a peer of
+                            // the two above it.
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                TextButton(
+                                    text = stringResource(
+                                        if (exporting) {
+                                            R.string.log_exporting
+                                        } else {
+                                            R.string.log_export
+                                        }
+                                    ),
+                                    onClick = {
+                                        if (exporting) return@TextButton
+                                        exporting = true
+                                        scope.launch {
+                                            // The report is asked for fresh first. A file describing
+                                            // the module as it was when WeType last started would
+                                            // miss the very state the user is complaining about - and
+                                            // the log inside it is the same request's log.
+                                            AppSettings.askHostForReport(context)
+                                            delay(REPORT_WAIT_MS)
+                                            val fresh = withContext(Dispatchers.IO) {
+                                                ModuleStatusStore.read(context)
+                                            }
+                                            status = fresh
+                                            val exported = withContext(Dispatchers.IO) {
+                                                ReportExport.export(context, fresh)
+                                            }
+                                            exporting = false
+                                            if (exported == null) {
+                                                Toast.makeText(
+                                                    context,
+                                                    R.string.log_export_failed,
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(
+                                                        R.string.log_exported,
+                                                        exported.displayPath
+                                                    ),
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                                // The file is already in Downloads, so a device with
+                                                // nothing to share to costs the chooser and nothing
+                                                // else - which is why this is allowed to fail quietly.
+                                                runCatching {
+                                                    ReportExport.share(
+                                                        context,
+                                                        exported,
+                                                        context.getString(R.string.log_share_title)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !exporting
+                                )
+                            }
                         }
                     }
                 }
@@ -597,21 +663,9 @@ private fun Hint.text(requiredApi: Int, actualHostVersion: String?): String = wh
 }
 
 /**
- * The framework row: name, version, and the version code when the framework supplied one.
- *
- * The code is what a user can match against their own screen - LSPosed and KernelSU both write
- * "LSPosed v2.2.0 (7854)" - so leaving it out made a correct reading look like a different build.
- * A blank is reported as such rather than dressed up: the web of guesses a wrong version invites is
- * worse than an honest gap.
+ * The framework row's text comes from [frameworkText] in the shared model, which the exported
+ * report renders with too - see its comment for why the version code is part of the reading.
  */
-private fun frameworkText(status: ModuleStatus): String? {
-    val name = listOf(status.frameworkName, status.frameworkVersion)
-        .filter { part -> part.isNotBlank() }
-        .joinToString(" ")
-    if (name.isBlank()) return null
-    return if (status.frameworkVersionCode > 0L) "$name (${status.frameworkVersionCode})" else name
-}
-
 private fun requiredApiOrDeclared(status: ModuleStatus?): Int =
     status?.requiredApiVersion ?: SettingsBridge.REQUIRED_API_VERSION
 
