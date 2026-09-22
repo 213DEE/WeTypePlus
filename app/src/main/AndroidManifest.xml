@@ -5,6 +5,18 @@
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <!--
+      The update check is the *only* thing this app puts on the network: one HTTPS request to
+      GitHub's releases API when the app opens, and again if the user taps "check for updates".
+
+      The module's status reports are unaffected - they never leave the device. They travel from
+      inside WeType to this app's private preferences over an in-process broadcast, which needs no
+      network permission at all (see `BridgeReceiver`). Before 1.0.26 this app requested no network
+      permission whatsoever, so anyone auditing that change should read no further than
+      `UpdateCheck`, which is the only caller.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
       Android 11+ package visibility: a package not listed here is invisible to PackageManager,
       which is indistinguishable from "not installed". These three are the ones the diagnostics
       screen has to name - the host, and the framework managers it knows how to look for.

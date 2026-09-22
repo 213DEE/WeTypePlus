@@ -72,7 +72,9 @@ internal fun SettingsScreen(
     settings: KeyboardSettings,
     onSettingsChange: (KeyboardSettings) -> Unit,
     onOpenDiagnostics: () -> Unit,
-    onOpenSupport: () -> Unit
+    onOpenSupport: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    checkingUpdate: Boolean
 ) {
     val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior(state = rememberTopAppBarState())
@@ -193,6 +195,19 @@ internal fun SettingsScreen(
                             }
                             HorizontalDivider()
                             BasicComponent(
+                                title = stringResource(R.string.update_check_title),
+                                summary = stringResource(
+                                    if (checkingUpdate) {
+                                        R.string.update_checking
+                                    } else {
+                                        R.string.update_check_summary
+                                    }
+                                ),
+                                onClick = onCheckUpdate,
+                                endActions = { ChevronIcon() }
+                            )
+                            HorizontalDivider()
+                            BasicComponent(
                                 title = stringResource(R.string.about_github_title),
                                 summary = stringResource(R.string.about_github_summary),
                                 onClick = {
@@ -277,7 +292,7 @@ private fun ChevronIcon() {
  * rather than a crash: an `ActivityNotFoundException` here would take down the settings page for
  * what is only a broken link.
  */
-private fun openUrl(context: Context, url: String) {
+internal fun openUrl(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }.onFailure {
@@ -310,7 +325,7 @@ private fun SwitchRow(
 }
 
 @Composable
-private fun appVersionName(): String {
+internal fun appVersionName(): String {
     val context = LocalContext.current
     return remember(context) {
         @Suppress("DEPRECATION")

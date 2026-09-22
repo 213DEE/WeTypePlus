@@ -81,6 +81,22 @@ Failed: ...           某个 hook 没装上（不影响其他功能）
 
 **键盘在横屏下还是只占 71%？** 宿主的缩放系数在横屏下拿屏幕**短边**当分子，所以横竖屏键盘宽度基本一致。这是上游设计，本模块的「解除宽度上限」抬高的是上限，不改变这个基准。
 
+### 权限与隐私
+
+本应用**只申请两条权限**，都是普通权限，装完即生效、不需要运行时授权：
+
+| 权限 | 用途 |
+|---|---|
+| `KILL_BACKGROUND_PROCESSES` | 「重启微信输入法」那个按钮，用来让模块在 `:hld` 进程里重新加载 |
+| `INTERNET` | **仅用于检查更新**（1.0.26 起）：打开应用时向 GitHub 查一次有没有新版本，你也可以在「关于」里手动查 |
+
+关于第二条，说明白一点：
+
+- **模块的状态上报不走网络。** 组件在微信输入法进程里看到的东西（框架版本、装上了多少 Hook 等）只通过**进程间广播**送到本应用自己的私有存储，**全程不出设备** —— 这条路跟 `INTERNET` 权限没有关系。
+- **除了检查更新，本应用不会发起任何网络请求。** 全项目的联网代码只有一处（`UpdateCheck.kt`），它只读 GitHub 的 releases 接口，只为比对版本号和取更新说明。
+- **没有统计、没有埋点、没有崩溃上报。** 应用里显示的那些环境信息，只有你自己点「导出日志」才会离开设备。
+- ⚠️ 但要说清楚：**有了这条权限，应用在系统看来就是「能联网的应用」**。1.0.25 及更早的版本连这条权限都没有申请过，它是 1.0.26 才加的。
+
 ### 支持作者
 
 **关于收费**：Alpha 阶段将始终保持免费——所有功能默认就是开的，不存在解锁一说；不排除将来推出 Beta 或正式版后，部分功能收费的可能。
@@ -153,6 +169,22 @@ Other devices and OS versions are untested. If a future host build renames the i
 6. Open the module's settings and toggle what you need.
 
 > If you still have the older `com.xposed.wetypehook` module installed, **disable it first**. Both hook the same methods, and running them together double-hooks.
+
+### Permissions and privacy
+
+The app requests exactly two permissions, both normal ones - granted at install time, no runtime prompt:
+
+| Permission | Purpose |
+|---|---|
+| `KILL_BACKGROUND_PROCESSES` | The "restart WeType" button, which makes the module reload inside the `:hld` process |
+| `INTERNET` | **Update checks only** (since 1.0.26): one GitHub request when the app opens, plus whatever you ask for from "Check for updates" in About |
+
+On the second one, plainly:
+
+- **Status reports do not use the network.** What the module sees inside WeType's process - framework version, how many hooks installed - reaches this app over an **in-process broadcast** and lands in its private storage. **Nothing leaves the device.** The `INTERNET` permission plays no part in that path.
+- **Apart from the update check, the app makes no network requests at all.** There is exactly one piece of networking code in the project (`UpdateCheck.kt`); it reads the GitHub releases endpoint and nothing else - read-only, and only to compare version numbers and fetch release notes.
+- **No analytics, no telemetry, no crash reporting.** Every environment detail shown in the app leaves the device only when you tap "Export log" yourself.
+- ⚠️ Stated plainly: **with this permission the app is, as far as the system is concerned, an app that can use the network.** Versions 1.0.25 and earlier never requested it; it arrives in 1.0.26.
 
 ### Support
 
