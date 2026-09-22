@@ -32,6 +32,53 @@
     <string name="support_disclaimer">Donations are voluntary and give no extra features, no priority support and no licence. Thanks either way.</string>
     <string name="support_qr_cd">WeChat tip QR code</string>
 
+    <!-- Diagnostics -->
+    <string name="section_diagnostics">Diagnostics</string>
+    <string name="diagnostics_title">Environment check</string>
+    <string name="diagnostics_desc">See whether the module is actually running inside WeType.</string>
+    <string name="diagnostics_state_active">Running inside WeType</string>
+    <string name="diagnostics_state_missing">No report from WeType yet</string>
+    <string name="diagnostics_state_reported">Last report: %1$s</string>
+    <string name="diagnostics_label_framework">Framework</string>
+    <string name="diagnostics_label_manager">Framework manager</string>
+    <string name="diagnostics_label_api">API level</string>
+    <string name="diagnostics_label_host">WeType version</string>
+    <string name="diagnostics_label_process">Reporting process</string>
+    <string name="diagnostics_label_ime">Current input method</string>
+    <string name="diagnostics_label_hooks">Hooks installed</string>
+    <string name="diagnostics_label_failed">Hooks failed</string>
+    <string name="diagnostics_api_ok">%1$d - meets the required %2$d</string>
+    <string name="diagnostics_api_low">%1$d - requires %2$d</string>
+    <string name="diagnostics_host_verified">%1$s - verified</string>
+    <string name="diagnostics_host_unverified">%1$s - not verified</string>
+    <string name="diagnostics_hooks_summary">%1$d installed, %2$d failed</string>
+    <string name="diagnostics_unknown">Unknown</string>
+    <string name="diagnostics_none">None</string>
+    <string name="diagnostics_fix_title">What to do</string>
+    <string name="diagnostics_fix_framework">Your framework is older than libxposed API %1$d, so it does not load this module at all: LSPosed shows the switch as on and nothing happens. Update to LSPosed 2.2 or newer (or Vector 2.2+), then restart WeType.</string>
+    <string name="diagnostics_fix_no_manager">No framework manager was found on this device. This module needs root and LSPosed 2.2 or newer (libxposed API %1$d).</string>
+    <string name="diagnostics_fix_scope">Confirm the module is enabled in LSPosed and that its scope includes WeType. The scope is applied automatically from the module\'s own declaration, but a manual change overrides it.</string>
+    <string name="diagnostics_fix_restart">WeType\'s keyboard process was already running when the module was installed, so the hooks never reached it. Use “Restart WeType” above.</string>
+    <string name="diagnostics_fix_host">This build targets WeType %1$s and this device runs %2$s. Hooks that address the host by its internal names may stay inactive.</string>
+    <string name="diagnostics_fix_ime">WeType is not the current input method on this device.</string>
+    <string name="diagnostics_refresh">Refresh</string>
+    <string name="diagnostics_clear">Clear saved report</string>
+    <string name="diagnostics_cleared">Saved report cleared</string>
+
+    <!-- Log -->
+    <string name="section_log">Log</string>
+    <string name="log_desc">Everything the module logged inside WeType, oldest first. Reading it needs root.</string>
+    <string name="log_loading">Reading the log…</string>
+    <string name="log_empty">Nothing logged yet. Open WeType once, then come back and refresh.</string>
+    <string name="log_no_root">Root access was refused, so the log cannot be read. Grant root to this app, then refresh.</string>
+    <string name="log_failed">Could not read the log: %1$s</string>
+    <string name="log_refresh">Refresh</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_cleared">Log cleared</string>
+    <string name="log_copy">Copy</string>
+    <string name="log_copied">Log copied</string>
+    <string name="log_truncated">Showing the last %1$d lines.</string>
+
     <!-- About -->
     <string name="about_version">Version %1$s</string>
     <string name="about_github_title">GitHub</string>

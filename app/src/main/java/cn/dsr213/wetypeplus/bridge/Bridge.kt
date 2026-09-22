@@ -1,14 +1,21 @@
 package cn.dsr213.wetypeplus.bridge
 
 import android.app.Application
+import android.os.Bundle
 import android.util.Log as AndroidLog
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import java.lang.reflect.Method
+import java.util.Collections
+import java.util.LinkedHashSet
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Log tag used by every line this module writes. */
 const val LOG_TAG = "WeTypePlus"
+
+/** Prefixes that mark a hook installation line as a result rather than a diagnostic. */
+private const val AUDIT_SUCCESS = "Success: "
+private const val AUDIT_FAILURE = "Failed: "
 
 /**
  * The one and only place that talks to libxposed.
@@ -17,7 +24,7 @@ const val LOG_TAG = "WeTypePlus"
  * below, which keeps the hook classes free of framework types and therefore testable and
  * readable. This file is the entire framework coupling of the project.
  *
- * Two rules shape the code here:
+ * Three rules shape the code here:
  *
  * 1. **Never read a host static while hooks are being installed.** `Class.forName(name, false, …)`
  *    is used everywhere precisely so that resolving a class never runs its static initialiser.
@@ -26,6 +33,12 @@ const val LOG_TAG = "WeTypePlus"
  * 2. **Every registration goes through the interceptor chain.** No hook is installed unless
  *    [attach] has supplied the module instance, so a missing framework fails loudly at install
  *    time instead of silently doing nothing.
+ * 3. **The API level is declared, not assumed.** `module.prop` asks for libxposed API 102, so the
+ *    API 102 calls below are legal - and the reason that declaration matters belongs right next to
+ *    them. A framework *below* the declared level does not fail loudly: it declines to load the
+ *    module at all and leaves the user looking at an enabled switch that does nothing. Raising the
+ *    required level again therefore means updating `module.prop`, this file, and what the
+ *    diagnostics screen tells the user to install.
  */
 object Bridge {
     @Volatile
@@ -34,7 +47,32 @@ object Bridge {
     @Volatile
     private var classLoader: ClassLoader? = null
 
+    /** Monotonic suffix for `HookBuilder.setId`, which is how a hook is named in framework logs. */
     private val hookSequence = AtomicInteger(0)
+
+    /** The framework's own identity, recorded at [attach] time and shipped to the settings app. */
+    @Volatile
+    private var frameworkName: String? = null
+
+    @Volatile
+    private var frameworkVersion: String? = null
+
+    @Volatile
+    private var frameworkVersionCode: Long = 0L
+
+    @Volatile
+    private var frameworkApiVersion: Int = 0
+
+    /**
+     * Hook-install results, kept as two ordered sets of labels.
+     *
+     * Filled from the log rather than from each hook's own return value: `Log.i("Success: …")` /
+     * `Log.i("Failed: …")` is already this project's convention for reporting an installation
+     * outcome, so reading it back here keeps one source of truth instead of two.
+     */
+    private val hooksInstalled = Collections.synchronizedSet(LinkedHashSet<String>())
+
+    private val hooksFailed = Collections.synchronizedSet(LinkedHashSet<String>())
 
     fun attach(module: XposedModule, classLoader: ClassLoader? = null) {
         this.module = module
@@ -49,10 +87,33 @@ object Bridge {
     /** Drops generation-local bookkeeping so a hot reload starts from a clean slate. */
     fun prepareForHotReload() {
         hookSequence.set(0)
+        synchronized(hooksInstalled) { hooksInstalled.clear() }
+        synchronized(hooksFailed) { hooksFailed.clear() }
     }
 
+    /** Unhooks whatever the previous generation left behind. */
     fun finishHotReload(handles: List<XposedInterface.HookHandle>?) {
         handles?.forEach { handle -> runCatching { handle.unhook() } }
+    }
+
+    fun recordFramework(name: String?, version: String?, versionCode: Long, apiVersion: Int) {
+        frameworkName = name
+        frameworkVersion = version
+        frameworkVersionCode = versionCode
+        frameworkApiVersion = apiVersion
+    }
+
+    /**
+     * Files one log line as a hook outcome, when it is one.
+     *
+     * Called for every line this module emits, so the match has to stay narrow: only the two
+     * prefixes the hook installers already use count as results.
+     */
+    internal fun recordAuditLine(line: String) {
+        when {
+            line.startsWith(AUDIT_SUCCESS) -> hooksInstalled.add(line.removePrefix(AUDIT_SUCCESS))
+            line.startsWith(AUDIT_FAILURE) -> hooksFailed.add(line.removePrefix(AUDIT_FAILURE))
+        }
     }
 
     internal fun moduleOrNull(): XposedModule? = module
@@ -63,9 +124,9 @@ object Bridge {
         method: Method,
         kind: String,
         hooker: XposedInterface.Hooker
-    ): XposedInterface.HookHandle {
+    ) {
         val target = module ?: error(
-            "libxposed module is not attached yet; refusing to hook ${method.name}"
+            "libxposed module is not attached yet; refusing to hook ${method.name}::$kind"
         )
         val id = buildString {
             append("wetypeplus:")
@@ -77,11 +138,72 @@ object Bridge {
             append(':')
             append(hookSequence.getAndIncrement())
         }
-        return target.hook(method)
+        target.hook(method)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .setId(id)
             .intercept(hooker)
     }
+
+    /**
+     * Ships the installation result to the settings app, off the calling thread.
+     *
+     * The caller sits inside the host's `onPackageReady`, i.e. on the input method's main thread,
+     * and the receiving end is a provider in a *different* process - one the system may have to
+     * start first. Doing that inline would stall the keyboard's start-up for however long a cold
+     * process launch takes, so the whole thing runs on its own thread and a failure is only ever
+     * a log line.
+     */
+    fun publishStatusAsync() {
+        Thread {
+            runCatching { publishStatus() }
+                .onFailure { Log.i("Status report skipped: ${it.message ?: it.javaClass.name}") }
+        }.apply {
+            name = "wetypeplus-status"
+            isDaemon = true
+        }.start()
+    }
+
+    private fun publishStatus() {
+        val application = currentApplication() ?: return
+        // `Collections.synchronizedSet` guards single calls only - iterating it needs the lock
+        // held, and `toList()` iterates.
+        val installedNow = synchronized(hooksInstalled) { hooksInstalled.toList() }
+        val failedNow = synchronized(hooksFailed) { hooksFailed.toList() }
+        val extras = Bundle().apply {
+            putInt(SettingsBridge.KEY_WIRE_VERSION, SettingsBridge.WIRE_VERSION)
+            putLong(SettingsBridge.KEY_TIMESTAMP, System.currentTimeMillis())
+            putString(SettingsBridge.KEY_FRAMEWORK_NAME, frameworkName)
+            putString(SettingsBridge.KEY_FRAMEWORK_VERSION, frameworkVersion)
+            putLong(SettingsBridge.KEY_FRAMEWORK_VERSION_CODE, frameworkVersionCode)
+            putInt(SettingsBridge.KEY_API_VERSION, frameworkApiVersion)
+            putInt(SettingsBridge.KEY_MIN_API_VERSION, SettingsBridge.REQUIRED_API_VERSION)
+            putString(SettingsBridge.KEY_PROCESS_NAME, currentProcessName())
+            putString(SettingsBridge.KEY_HOST_VERSION, hostVersion(application))
+            putStringArrayList(SettingsBridge.KEY_INSTALLED, ArrayList(installedNow))
+            putStringArrayList(SettingsBridge.KEY_FAILED, ArrayList(failedNow))
+        }
+        application.contentResolver.call(
+            SettingsBridge.CONTENT_URI,
+            SettingsBridge.METHOD_REPORT,
+            null,
+            extras
+        )
+    }
+
+    private fun currentProcessName(): String = runCatching {
+        Class.forName("android.app.ActivityThread")
+            .getDeclaredMethod("currentProcessName")
+            .apply { isAccessible = true }
+            .invoke(null) as? String
+    }.getOrNull() ?: ""
+
+    /** WeType's own version, read from inside WeType's process - no package-visibility filter applies. */
+    private fun hostVersion(application: Application): String = runCatching {
+        @Suppress("DEPRECATION")
+        application.packageManager
+            .getPackageInfo(SettingsBridge.HOST_PACKAGE, 0)
+            .versionName
+    }.getOrNull() ?: ""
 }
 
 /**
@@ -119,6 +241,9 @@ object Log {
 
     private fun emit(priority: Int, message: Any?) {
         val level = if (priority == AndroidLog.ERROR) "E" else "I"
+        // Fed in raw, before the `[I] ` decoration: the audit matches on this module's own
+        // `Success: ` / `Failed: ` prefixes, which the decoration would hide.
+        if (message is String) Bridge.recordAuditLine(message)
         val target = Bridge.moduleOrNull()
         if (message is Throwable) {
             val text = "[$level] ${message.message ?: message.javaClass.name}"

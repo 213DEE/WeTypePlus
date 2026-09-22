@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class Screen {
     Settings,
+    Diagnostics,
     Support
 }
 
@@ -60,7 +61,12 @@ private fun WeTypePlusApp() {
                 settings = updated
                 AppSettings.write(context, updated)
             },
+            onOpenDiagnostics = { screen = Screen.Diagnostics },
             onOpenSupport = { screen = Screen.Support }
+        )
+
+        Screen.Diagnostics -> DiagnosticsScreen(
+            onBack = { screen = Screen.Settings }
         )
 
         Screen.Support -> SupportScreen(

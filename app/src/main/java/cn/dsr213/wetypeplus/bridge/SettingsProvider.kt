@@ -5,8 +5,11 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Bundle
 import cn.dsr213.wetypeplus.AppSettings
 import cn.dsr213.wetypeplus.KeyboardSettings
+import cn.dsr213.wetypeplus.ModuleStatus
+import cn.dsr213.wetypeplus.ModuleStatusStore
 
 /**
  * The process boundary.
@@ -20,13 +23,23 @@ import cn.dsr213.wetypeplus.KeyboardSettings
  * documented mechanism for exactly this problem, and it lets the settings screen be an ordinary
  * activity in an ordinary process.
  *
- * The surface is intentionally tiny: one `query` returning one row of two 0/1 columns. There is
- * nothing else to call - no inserts, no updates, no file paths.
+ * Two directions travel over it, both narrow:
+ *
+ * * `query` returns one row of two 0/1 columns - the switch states the hooks need to read.
+ * * `call` accepts one status report from the host process and stores it for the diagnostics
+ *   screen. Nothing here is read back by the hooks, so a forged or garbled report can only
+ *   mislead the *display*; it cannot change how the keyboard behaves.
  */
 class SettingsProvider : ContentProvider() {
+
     companion object {
-        const val AUTHORITY = "cn.dsr213.wetypeplus.settings"
-        val CONTENT_URI: Uri = Uri.parse("content://$AUTHORITY/settings")
+        const val AUTHORITY = SettingsBridge.AUTHORITY
+
+        /** Kept as a field so existing call sites read the same way they always have. */
+        val CONTENT_URI: Uri = SettingsBridge.CONTENT_URI
+
+        /** Result of [call]: `true` when the report was understood and stored. */
+        const val RESULT_ACCEPTED = "accepted"
     }
 
     override fun onCreate(): Boolean = true
@@ -48,6 +61,29 @@ class SettingsProvider : ContentProvider() {
             )
         )
         return columns
+    }
+
+    /**
+     * Receives the module's status report from WeType's process.
+     *
+     * Runs on a binder thread, so the synchronous store write below cannot stall this app's main
+     * thread. A wire-version mismatch is refused rather than decoded: it means the module half and
+     * the app half of an upgrade were installed at different times, and reading it as the current
+     * shape would put nonsense on screen.
+     *
+     * The call is unauthenticated. That is deliberate - the host process holds no permission this
+     * app could ask for, and the only thing at stake is what the diagnostics screen shows.
+     */
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
+        if (method != SettingsBridge.METHOD_REPORT) return null
+        val context = context ?: return null
+        val report = extras ?: return null
+        val accepted = report.getInt(SettingsBridge.KEY_WIRE_VERSION, 0) ==
+            SettingsBridge.WIRE_VERSION
+        if (accepted) {
+            ModuleStatusStore.write(context, ModuleStatus.fromReport(report))
+        }
+        return Bundle().apply { putBoolean(RESULT_ACCEPTED, accepted) }
     }
 
     override fun getType(uri: Uri): String? = null

@@ -13,8 +13,8 @@ android {
         applicationId = "cn.dsr213.wetypeplus"
         minSdk = 31
         targetSdk = 37
-        versionCode = 23
-        versionName = "1.0.22-alpha"
+        versionCode = 24
+        versionName = "1.0.23-alpha"
     }
 
     buildTypes {

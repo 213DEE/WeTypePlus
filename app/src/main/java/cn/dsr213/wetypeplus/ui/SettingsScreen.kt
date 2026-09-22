@@ -71,6 +71,7 @@ internal val ContentMaxWidth = 640.dp
 internal fun SettingsScreen(
     settings: KeyboardSettings,
     onSettingsChange: (KeyboardSettings) -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onOpenSupport: () -> Unit
 ) {
     val context = LocalContext.current
@@ -128,6 +129,21 @@ internal fun SettingsScreen(
                                 }
                             )
                         }
+                    }
+                }
+
+                item {
+                    SmallTitle(text = stringResource(R.string.section_diagnostics))
+                    Card(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        insideMargin = PaddingValues(0.dp)
+                    ) {
+                        BasicComponent(
+                            title = stringResource(R.string.diagnostics_title),
+                            summary = stringResource(R.string.diagnostics_desc),
+                            onClick = onOpenDiagnostics,
+                            endActions = { ChevronIcon() }
+                        )
                     }
                 }
 
