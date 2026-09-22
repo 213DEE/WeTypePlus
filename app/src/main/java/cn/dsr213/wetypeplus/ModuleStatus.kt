@@ -3,6 +3,7 @@ package cn.dsr213.wetypeplus
 import android.content.Context
 import android.os.Bundle
 import cn.dsr213.wetypeplus.bridge.SettingsBridge
+import kotlin.math.abs
 
 /**
  * The last thing the module said about itself from inside WeType's process.
@@ -94,6 +95,14 @@ private const val MAX_HOOK_LABELS = 256
 private const val MAX_LABEL_LENGTH = 200
 private const val MAX_LOG_LINES = 400
 private const val MAX_LOG_LINE_LENGTH = 400
+
+/**
+ * How close in time two reports must be to count as answers to the same request.
+ *
+ * Reports that belong to one request arrive within milliseconds of each other; anything further
+ * apart is a separate reading and is compared on its own merits. See [ModuleStatusStore.write].
+ */
+private const val STALE_REPORT_WINDOW_MS = 15_000L
 
 /**
  * Readers that cannot throw, for a bundle written by another process.
@@ -201,16 +210,50 @@ object ModuleStatusStore {
         if (existing != null && existing.fromKeyboardProcess && !status.fromKeyboardProcess) {
             return
         }
+        // A report with no hook results at all must not displace a recent report that has them.
+        //
+        // After a hot reload the retired generations keep their broadcast receivers - they were
+        // registered against the host's `Application`, and only the new generation's code can know
+        // to stay quiet about it. One report request therefore produces several: measured after an
+        // update under a running WeType, three reports from the same `:hld` process arrived within
+        // two milliseconds - the live one with "24 hooks installed" and two stale ones with "0 hooks
+        // installed" - and with plain last-write-wins the screen showed an empty hook list.
+        //
+        // The rule is deliberately order-independent, because arrival order is not guaranteed: an
+        // empty report is only refused while a *recent* report that has hooks is already stored, so
+        // whichever order they arrive in, the report with the hook list is what ends up on screen. A
+        // genuine all-failed install still lands (that report carries entries in `failed`), and so
+        // does an empty report that is the only thing we have.
+        val incomingHasNoResults = status.installed.isEmpty() && status.failed.isEmpty()
+        val existingIsRecentAndHasResults = existing != null &&
+            existing.installed.isNotEmpty() &&
+            abs(status.timestamp - existing.timestamp) <= STALE_REPORT_WINDOW_MS
+        if (incomingHasNoResults && existingIsRecentAndHasResults) {
+            return
+        }
+        // The framework's identity is carried forward, not overwritten with a blank.
+        //
+        // A report can legitimately arrive without it: the module is loaded by the framework once
+        // per process, and a hot reload starts a generation that never got that hand-over. Writing
+        // that blank through would replace a known-good "LSPosed 2.2.0 / API 102" with "未知 /
+        // API 0" on screen - the row would get *worse* the longer the module ran. A non-blank value
+        // in the incoming report always wins, so a genuine framework switch still shows up.
+        val frameworkName = status.frameworkName.ifBlank { existing?.frameworkName.orEmpty() }
+        val frameworkVersion = status.frameworkVersion.ifBlank { existing?.frameworkVersion.orEmpty() }
+        val frameworkVersionCode = status.frameworkVersionCode
+            .takeIf { it > 0L } ?: existing?.frameworkVersionCode ?: 0L
+        val apiVersion = status.apiVersion
+            .takeIf { it > 0 } ?: existing?.apiVersion ?: 0
         // `commit` rather than `apply`: the caller is a broadcast receiver that is about to return,
         // after which this process may be frozen, and losing the report there would leave the user
         // staring at "no report" with no way to know one had arrived.
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putLong(KEY_TIMESTAMP, status.timestamp)
-            .putString(KEY_FRAMEWORK_NAME, status.frameworkName)
-            .putString(KEY_FRAMEWORK_VERSION, status.frameworkVersion)
-            .putLong(KEY_FRAMEWORK_VERSION_CODE, status.frameworkVersionCode)
-            .putInt(KEY_API_VERSION, status.apiVersion)
+            .putString(KEY_FRAMEWORK_NAME, frameworkName)
+            .putString(KEY_FRAMEWORK_VERSION, frameworkVersion)
+            .putLong(KEY_FRAMEWORK_VERSION_CODE, frameworkVersionCode)
+            .putInt(KEY_API_VERSION, apiVersion)
             .putInt(KEY_REQUIRED_API_VERSION, status.requiredApiVersion)
             .putString(KEY_PROCESS_NAME, status.processName)
             .putString(KEY_HOST_VERSION, status.hostVersion)

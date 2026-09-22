@@ -62,10 +62,27 @@ object SettingsBridge {
      */
     const val HOST_KEYBOARD_PROCESS = "com.tencent.wetype:hld"
 
-    /** Framework managers, so the screen can name the version the user is actually running. */
+    /**
+     * Framework managers, so the screen can name the version the user is actually running.
+     *
+     * Note what this list *cannot* answer: whether the user has a usable manager at all. Measured on
+     * the test device (LSPosed 2.2.0 / 7854, Zygisk Next 1.5.0): the framework's manager is not an
+     * installed package - `pm path org.lsposed.manager` is empty, there is no `/data/app` entry and
+     * no `/data/data/org.lsposed.manager` - yet `manager.apk` sits in the KernelSU module directory
+     * (`/data/adb/modules/zygisk_lsposed/manager.apk`, verified as `org.lsposed.manager` 2.2.0 /
+     * 7854) and the manager does open, launched through an `org.lsposed.manager.LAUNCH_MANAGER`
+     * intent redirect. So a miss here means "not installed as an app", which is *not* "the user has
+     * no manager", and the diagnostics screen has to phrase it that way.
+     */
     val FRAMEWORK_MANAGER_PACKAGES = listOf(
+        // LSPosed (current) and the fork that kept its own application id.
         "org.lsposed.manager",
-        "io.github.lsposed.manager"
+        "io.github.lsposed.manager",
+        // The managers the older frameworks ship, for users who are not on LSPosed 2.x yet. They
+        // cannot load this module (it declares libxposed API 102), but naming their version is what
+        // tells such a user why nothing happened.
+        "org.meowcat.edxposed.manager",
+        "de.robv.android.xposed.installer"
     )
 
     /**

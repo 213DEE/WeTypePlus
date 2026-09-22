@@ -50,6 +50,7 @@
     <string name="diagnostics_label_switches">Switches</string>
     <string name="diagnostics_api_ok">%1$d - meets the required %2$d</string>
     <string name="diagnostics_api_low">%1$d - requires %2$d</string>
+    <string name="diagnostics_api_unknown">not reported (module needs %1$d)</string>
     <string name="diagnostics_host_verified">%1$s - verified</string>
     <string name="diagnostics_host_unverified">%1$s - not verified</string>
     <string name="diagnostics_hooks_summary">%1$d installed, %2$d failed</string>
@@ -58,7 +59,9 @@
     <string name="diagnostics_fix_title">What to do</string>
     <string name="diagnostics_fix_framework">Your framework is older than libxposed API %1$d, so it does not load this module at all: LSPosed shows the switch as on and nothing happens. Update to LSPosed 2.2 or newer (or Vector 2.2+), then restart WeType.</string>
     <string name="diagnostics_fix_scope">If WeType has already been restarted and this is still empty, check two things: that the module is enabled in LSPosed with WeType in its scope, and that your LSPosed is 2.2 or newer (libxposed API %1$d) - an older framework refuses to load this module and says nothing about it.</string>
-    <string name="diagnostics_manager_absent">Not installed</string>
+    <string name="diagnostics_manager_absent">Not detected</string>
+    <string name="diagnostics_manager_bundled">No standalone app</string>
+    <string name="diagnostics_fix_manager">The framework manager row asks whether the manager is installed as an app of its own. LSPosed\'s manager does not have to be installed to be opened - it ships with the framework module (there is a manager.apk inside the module directory), and the action button on the LSPosed module page in KernelSU opens it. So "no standalone app" here is not a fault: as long as the framework row above reads LSPosed, everything is in order.</string>
     <string name="diagnostics_fix_restart">WeType\'s keyboard process was already running when the module was installed, so the hooks never reached it. Force-stop WeType - “Restart WeType” on the settings page does it - and open its keyboard again.</string>
     <string name="diagnostics_fix_hooks">Some hooks could not be installed. If you have just installed or updated this module, force-stop WeType once: the hooks are attached when its processes start, so a module updated while WeType was running only takes full effect after that. If this list survives the restart, this WeType build has most likely renamed the methods these hooks target, and the module needs an update.</string>
     <string name="diagnostics_fix_host">This build targets WeType %1$s and this device runs %2$s. Hooks that address the host by its internal names may stay inactive.</string>

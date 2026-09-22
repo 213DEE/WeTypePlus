@@ -78,7 +78,10 @@ object Bridge {
     /** Monotonic suffix for `HookBuilder.setId`, which is how a hook is named in framework logs. */
     private val hookSequence = AtomicInteger(0)
 
-    /** The framework's own identity, recorded at [attach] time and shipped to the settings app. */
+    /**
+     * The framework's own identity, recorded via [recordFramework] when the module is loaded (and
+     * again after a hot reload) and shipped to the settings app.
+     */
     @Volatile
     private var frameworkName: String? = null
 
@@ -180,12 +183,28 @@ object Bridge {
         if (loader != null) classLoader = loader
     }
 
+    /**
+     * Set when a hot reload has replaced this generation.
+     *
+     * A retired generation is not dead code: its broadcast receivers stay registered, because they
+     * were registered against the host's `Application` and nothing unregisters them. Measured after
+     * one update under a running WeType: a single report request produced *three* reports from the
+     * same `:hld` process - the live generation answering "24 hooks installed" and two retired
+     * generations answering "0 hooks installed" - and the app stores whichever arrives last, so the
+     * diagnostics screen could end up showing an empty hook list for a module that was working. A
+     * retired generation has had its hooks unhooked and has no results worth reporting, so it stays
+     * quiet and lets the live one answer.
+     */
+    @Volatile
+    private var generationRetired = false
+
     /** Drops generation-local bookkeeping so a hot reload starts from a clean slate. */
     fun prepareForHotReload() {
         hookSequence.set(0)
         synchronized(hooksInstalled) { hooksInstalled.clear() }
         synchronized(hooksFailed) { hooksFailed.clear() }
         synchronized(reportedOnce) { reportedOnce.clear() }
+        generationRetired = true
     }
 
     /** Unhooks whatever the previous generation left behind. */
@@ -194,10 +213,15 @@ object Bridge {
     }
 
     fun recordFramework(name: String?, version: String?, versionCode: Long, apiVersion: Int) {
-        frameworkName = name
-        frameworkVersion = version
-        frameworkVersionCode = versionCode
-        frameworkApiVersion = apiVersion
+        // Only ever *add* to what is known; a blank or a zero is "could not read it", not "there is
+        // nothing there". The framework hands its identity over at load time, so a generation that
+        // never received it (a hot-reloaded one, before `ModuleEntry` re-records it) would otherwise
+        // overwrite a good answer with an empty one - which is exactly how the diagnostics screen
+        // came to show "未知" for a framework that was running fine.
+        if (!name.isNullOrBlank()) frameworkName = name
+        if (!version.isNullOrBlank()) frameworkVersion = version
+        if (versionCode > 0L) frameworkVersionCode = versionCode
+        if (apiVersion > 0) frameworkApiVersion = apiVersion
     }
 
     /**
@@ -393,6 +417,13 @@ object Bridge {
      * is allowed to do.
      */
     private fun publishStatus(trigger: String) {
+        // A retired generation has no hooks of its own any more - they were unhooked on reload - so
+        // its "0 hooks installed" is not a finding, it is the absence of one. Reporting it would
+        // race the live generation's report into the settings app's store. See [generationRetired].
+        if (generationRetired) {
+            Log.i("Status report skipped in ${currentProcessName()} ($trigger): retired by a hot reload")
+            return
+        }
         val context = awaitContext() ?: run {
             Log.i("Status report dropped in ${currentProcessName()} ($trigger): no Context")
             return

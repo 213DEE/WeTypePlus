@@ -125,6 +125,12 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
     val imePackage = remember(refreshToken) { EnvironmentProbe.enabledImePackage(context) }
     val hostIsIme = remember(refreshToken) { EnvironmentProbe.hostHasIme(context) }
 
+    // Only used to phrase an absent manager correctly. LSPosed 2.2 bundles its manager in the
+    // KernelSU module and never installs it as a package, so "not installed" is the normal state
+    // there and must not read like a fault. Taken from the report because the app's own process has
+    // no way to see a framework it is not loaded into.
+    val frameworkIsLsposed = status?.frameworkName?.contains("lsposed", ignoreCase = true) == true
+
     // The package probe first: it reads what is installed right now, whereas the report is a
     // snapshot from whenever WeType last started. A host updated after that snapshot is exactly
     // the case the hint needs to catch.
@@ -214,32 +220,50 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
 
                             InfoRow(
                                 label = stringResource(R.string.diagnostics_label_framework),
-                                value = status?.let {
-                                    listOf(it.frameworkName, it.frameworkVersion)
-                                        .filter { part -> part.isNotBlank() }
-                                        .joinToString(" ")
-                                        .ifBlank { stringResource(R.string.diagnostics_unknown) }
-                                } ?: stringResource(R.string.diagnostics_unknown)
+                                value = status?.let { frameworkText(it) }
+                                    ?: stringResource(R.string.diagnostics_unknown)
                             )
                             HorizontalDivider()
+                            // "Not found" here means "not installed as an app" and nothing more -
+                            // see `SettingsBridge.FRAMEWORK_MANAGER_PACKAGES` for the LSPosed 2.2
+                            // case, whose manager is bundled in the KernelSU module. The wording has
+                            // to keep that distinction, and the value names the package it found so
+                            // a user reporting a problem can say which manager they run.
                             InfoRow(
                                 label = stringResource(R.string.diagnostics_label_manager),
-                                value = manager?.versionName
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: stringResource(R.string.diagnostics_manager_absent)
+                                value = manager?.let { found ->
+                                    listOf(found.packageName, found.versionName)
+                                        .filter { part -> part.isNotBlank() }
+                                        .joinToString(" ")
+                                } ?: stringResource(
+                                    if (frameworkIsLsposed) {
+                                        R.string.diagnostics_manager_bundled
+                                    } else {
+                                        R.string.diagnostics_manager_absent
+                                    }
+                                )
                             )
                             HorizontalDivider()
+                            // An API level of zero is "the module never told us", not "level zero":
+                            // the module only loads at all on a framework that meets `minApiVersion`.
+                            // Printing it as a number turned a missing reading into "0 - 达到要求的
+                            // 102", a sentence that cannot be true.
                             InfoRow(
                                 label = stringResource(R.string.diagnostics_label_api),
                                 value = status?.let {
-                                    if (it.frameworkTooOld) {
-                                        stringResource(
+                                    when {
+                                        it.apiVersion <= 0 -> stringResource(
+                                            R.string.diagnostics_api_unknown,
+                                            requiredApi
+                                        )
+
+                                        it.frameworkTooOld -> stringResource(
                                             R.string.diagnostics_api_low,
                                             it.apiVersion,
                                             requiredApi
                                         )
-                                    } else {
-                                        stringResource(
+
+                                        else -> stringResource(
                                             R.string.diagnostics_api_ok,
                                             it.apiVersion,
                                             requiredApi
@@ -295,7 +319,8 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                     status = status,
                     imePackage = imePackage,
                     hostIsIme = hostIsIme,
-                    hostMismatch = hostMismatch
+                    hostMismatch = hostMismatch,
+                    managerInstalled = manager != null
                 )
                 if (hints.isNotEmpty()) {
                     item {
@@ -512,14 +537,16 @@ private enum class Hint {
     Restart,
     HooksMissing,
     HostMismatch,
-    NotDefaultIme
+    NotDefaultIme,
+    ManagerNotInstalled
 }
 
 private fun collectHints(
     status: ModuleStatus?,
     imePackage: String?,
     hostIsIme: Boolean,
-    hostMismatch: Boolean
+    hostMismatch: Boolean,
+    managerInstalled: Boolean
 ): List<Hint> = buildList {
     if (status == null) {
         // No report at all. Two readings, and the screen cannot tell them apart from this side:
@@ -536,6 +563,12 @@ private fun collectHints(
         // reach the process they belong to and could not be installed once they got there, which is
         // what a module updated under a running WeType looks like from the inside.
         if (status.failed.isNotEmpty()) add(Hint.HooksMissing)
+        // A missing manager package is normally not a fault at all: LSPosed 2.2 runs its manager
+        // straight out of the KernelSU module. Said only when a report proves the framework is
+        // LSPosed, because that is the only case where the explanation is known to be the right one.
+        if (!managerInstalled && status.frameworkName.contains("lsposed", ignoreCase = true)) {
+            add(Hint.ManagerNotInstalled)
+        }
     }
     // Read off whichever source answered, report or package probe, so a stale report cannot hide a
     // host that was updated after it was written.
@@ -560,6 +593,23 @@ private fun Hint.text(requiredApi: Int, actualHostVersion: String?): String = wh
     )
 
     Hint.NotDefaultIme -> stringResource(R.string.diagnostics_fix_ime)
+    Hint.ManagerNotInstalled -> stringResource(R.string.diagnostics_fix_manager)
+}
+
+/**
+ * The framework row: name, version, and the version code when the framework supplied one.
+ *
+ * The code is what a user can match against their own screen - LSPosed and KernelSU both write
+ * "LSPosed v2.2.0 (7854)" - so leaving it out made a correct reading look like a different build.
+ * A blank is reported as such rather than dressed up: the web of guesses a wrong version invites is
+ * worse than an honest gap.
+ */
+private fun frameworkText(status: ModuleStatus): String? {
+    val name = listOf(status.frameworkName, status.frameworkVersion)
+        .filter { part -> part.isNotBlank() }
+        .joinToString(" ")
+    if (name.isBlank()) return null
+    return if (status.frameworkVersionCode > 0L) "$name (${status.frameworkVersionCode})" else name
 }
 
 private fun requiredApiOrDeclared(status: ModuleStatus?): Int =

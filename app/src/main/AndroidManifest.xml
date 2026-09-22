@@ -13,6 +13,8 @@
         <package android:name="com.tencent.wetype" />
         <package android:name="org.lsposed.manager" />
         <package android:name="io.github.lsposed.manager" />
+        <package android:name="org.meowcat.edxposed.manager" />
+        <package android:name="de.robv.android.xposed.installer" />
     </queries>
 
     <!--

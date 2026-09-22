@@ -105,6 +105,31 @@ class ModuleEntry : XposedModule() {
         // that scenario: 21 of 24 hooks failed with "Failed to resolve
         // com.tencent.wetype.plugin.hld.utils.m1" and the module did nothing at all.
         Bridge.attach(this)
+        // The framework's identity has to be re-recorded here for the same reason the class loader
+        // does: the reload wiped it. `onModuleLoaded` is the only other place that records it, it
+        // does not run again for a reload, and the new generation starts with those statics at
+        // their initial values. Measured without this call: every report after a reload carried
+        // `framework_name=""`, `framework_version=""`, `framework_version_code=0`, `api_version=0`
+        // - so the diagnostics screen showed "未知" for the framework and "0 - 达到要求的 102" for
+        // the API level while the module was running on LSPosed 2.2.0 (7854) / API 102.
+        //
+        // Each read is guarded, and not for tidiness: `getFrameworkName()` and friends are `final`
+        // methods on `XposedInterfaceWrapper` that go through its `ensureAttached()`, which throws
+        // when the framework has not bound this generation yet. An exception thrown from here would
+        // take the whole hot reload down with it - hooks never reinstalled - so a missing identity
+        // must degrade to "keep what we had", never to a crash. `recordFramework` already ignores
+        // blanks and zeros, so an unreadable generation cannot erase a good earlier answer.
+        val name = runCatching { frameworkName }.getOrNull()
+        val version = runCatching { frameworkVersion }.getOrNull()
+        val versionCode = runCatching { frameworkVersionCode }.getOrDefault(0L)
+        val api = runCatching { apiVersion }.getOrDefault(0)
+        Bridge.recordFramework(
+            name = name,
+            version = version,
+            versionCode = versionCode,
+            apiVersion = api
+        )
+        Log.i("Framework after hot reload: $name $version ($versionCode), API $api")
         Bridge.finishHotReload(param.oldHookHandles)
         awaitHostApplication()
         Log.i("Host class loader after hot reload: ${Bridge.classLoaderDescription()}")
