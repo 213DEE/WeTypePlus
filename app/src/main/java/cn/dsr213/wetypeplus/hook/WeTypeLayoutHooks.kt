@@ -2611,6 +2611,13 @@ internal object WeTypeLayoutHooks {
                     if (HookSettings.unlockSingleHandMode) foldGateBypass.set(true)
                 }
                 gateMethod.hookAfter { param ->
+                    // Read the window *before* closing it. Clearing first is what this did until
+                    // 2026-09-22, and it made the `bypass` field in every report read `false` for
+                    // good: four `Single-hand gate:` lines were captured three seconds after
+                    // `Settings applied … unlockSingleHandMode=true`, and all four ended
+                    // `bypass=false`. The field exists precisely to say whether the fold gate was
+                    // bypassed during *this* evaluation, so it cannot be sampled after the reset.
+                    val bypassed = foldGateBypass.get()
                     foldGateBypass.set(false)
                     // Deliberately *not* forcing the result. `k2()` has four conditions and the
                     // last one is the user's own `ime_enable_single_hand_mode`; overriding it would
@@ -2620,7 +2627,7 @@ internal object WeTypeLayoutHooks {
                     // keyboard layout pass, and the first six calls all land during start-up, when
                     // the user's own setting has not been read yet. Keying on the trace is what
                     // keeps the interesting transition (the setting turning on) inside the budget.
-                    val trace = singleHandTrace()
+                    val trace = singleHandTrace(bypassed)
                     val seen = "$methodName=${param.result} $trace"
                     if (seen != lastGateTrace) {
                         lastGateTrace = seen
@@ -2641,8 +2648,11 @@ internal object WeTypeLayoutHooks {
      * The three inputs of `i1.k2()` other than the fold gate, so a field report is conclusive:
      * whether the keyboard is floating, which kind it is, whether that kind qualifies, and what
      * the two qualifying kind ids are.
+     *
+     * [bypassed] is handed in rather than read here because the caller is the one that owns the
+     * window's lifetime - by the time a caller could ask, it has already closed it.
      */
-    private fun singleHandTrace(): String = runCatching {
+    private fun singleHandTrace(bypassed: Boolean): String = runCatching {
         val kind = callOnSingleton(KEYBOARD_MODEL, "a", "t0")
         val typeOk = if (kind == null) null else callOnSingleton(KEYBOARD_MODEL, "a", "O1", kind)
         // The fourth condition and the bypass flag, so a report names *which* condition closed
@@ -2650,7 +2660,7 @@ internal object WeTypeLayoutHooks {
         val userOn = callOnSingleton(SETTINGS, "a", SINGLE_HAND_SETTING_READ, SINGLE_HAND_SETTING, false)
         "floating=${callOnSingleton(FLOAT_SINGLETON, "a", "V")} kind=$kind typeOk=$typeOk" +
             " sceneE=${keyboardSceneId("e")} sceneJ=${keyboardSceneId("j")}" +
-            " userOn=$userOn bypass=${foldGateBypass.get()}"
+            " userOn=$userOn bypass=$bypassed"
     }.getOrElse { "trace failed: $it" }
 
     private fun keyboardSceneId(field: String): Any? = runCatching {

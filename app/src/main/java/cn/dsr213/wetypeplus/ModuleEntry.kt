@@ -2,6 +2,7 @@ package cn.dsr213.wetypeplus
 
 import cn.dsr213.wetypeplus.bridge.Bridge
 import cn.dsr213.wetypeplus.bridge.Log
+import cn.dsr213.wetypeplus.bridge.currentApplication
 import cn.dsr213.wetypeplus.hook.HookSettings
 import cn.dsr213.wetypeplus.hook.WeTypeLayoutHooks
 import io.github.libxposed.api.XposedModule
@@ -79,6 +80,7 @@ class ModuleEntry : XposedModule() {
         }
         layoutHooksInstalled = true
         Bridge.updateClassLoader(param.classLoader)
+        Log.i("Host class loader: ${Bridge.classLoaderDescription()}")
         installLayoutHooks()
     }
 
@@ -92,12 +94,45 @@ class ModuleEntry : XposedModule() {
     }
 
     override fun onHotReloaded(param: HotReloadedParam) {
+        // No class loader comes with this call, by design of the framework: it hands one out only on
+        // the original `onPackageReady`, and a hot reload never runs that again. Worse, the reload
+        // loaded this generation in a *new* class loader, so every static in the module - including
+        // the one that remembered the host's loader - is back at its initial value.
+        //
+        // The loader is therefore re-derived from the host's own `Application` (see
+        // [Bridge.resolveClassLoader]), which is what makes the exact user-facing scenario work:
+        // installing an updated module APK while WeType is running. Measured before that fix, in
+        // that scenario: 21 of 24 hooks failed with "Failed to resolve
+        // com.tencent.wetype.plugin.hld.utils.m1" and the module did nothing at all.
         Bridge.attach(this)
         Bridge.finishHotReload(param.oldHookHandles)
+        awaitHostApplication()
+        Log.i("Host class loader after hot reload: ${Bridge.classLoaderDescription()}")
         installLayoutHooks()
     }
 
+    /**
+     * Waits, briefly and boundedly, for the host's `Application`.
+     *
+     * A hot reload normally arrives in a process that has been running for a while, so this returns
+     * immediately. It exists for the narrow overlap where the module is updated while WeType is
+     * still starting: installing hooks with no way to reach the host's classes would fail every one
+     * of them, and nothing would call back to correct it.
+     */
+    private fun awaitHostApplication() {
+        var waited = 0
+        while (currentApplication() == null && waited < APPLICATION_ATTEMPTS) {
+            waited++
+            runCatching { Thread.sleep(APPLICATION_INTERVAL_MS) }
+        }
+    }
+
     private fun installLayoutHooks() {
+        // Started before the hooks, not after: this is what puts the process's inbound receiver up,
+        // and a settings push that arrives while the hooks are being installed would otherwise be
+        // dropped on the floor. It is idempotent, and it costs nothing when there is no `Context`
+        // yet - the read path starts it again later.
+        HookSettings.startForProcess()
         runCatching { WeTypeLayoutHooks.install() }
             .onFailure { error ->
                 Log.e("Failed to install keyboard layout hooks")
@@ -106,10 +141,14 @@ class ModuleEntry : XposedModule() {
         // Publish what happened to the settings app, so "the module is enabled but nothing
         // changed" becomes a screen the user can read instead of a guess. Runs on its own thread:
         // this call site is the host's main thread during package start-up.
-        Bridge.publishStatusAsync()
+        Bridge.publishStatusAsync("hooks installed")
     }
 
     private companion object {
         const val HOST_PACKAGE = "com.tencent.wetype"
+
+        /** See [awaitHostApplication]: 20 × 100 ms is generous and still bounded. */
+        const val APPLICATION_ATTEMPTS = 20
+        const val APPLICATION_INTERVAL_MS = 100L
     }
 }

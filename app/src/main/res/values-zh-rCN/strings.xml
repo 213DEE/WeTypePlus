@@ -47,6 +47,7 @@
     <string name="diagnostics_label_ime">当前输入法</string>
     <string name="diagnostics_label_hooks">已装上的 Hook</string>
     <string name="diagnostics_label_failed">装失败的 Hook</string>
+    <string name="diagnostics_label_switches">开关状态</string>
     <string name="diagnostics_api_ok">%1$d - 达到要求的 %2$d</string>
     <string name="diagnostics_api_low">%1$d - 需要 %2$d</string>
     <string name="diagnostics_host_verified">%1$s - 已验证</string>
@@ -56,28 +57,25 @@
     <string name="diagnostics_none">无</string>
     <string name="diagnostics_fix_title">怎么办</string>
     <string name="diagnostics_fix_framework">你的框架低于 libxposed API %1$d，它根本不会加载本模块：LSPosed 里开关看着是开的，但什么都不会发生。请升级到 LSPosed 2.2 或更新版本（或 Vector 2.2+），再重启一次微信输入法。</string>
-    <string name="diagnostics_fix_no_manager">这台设备上没找到框架管理器。本模块需要 root，以及 LSPosed 2.2 或更新版本（libxposed API %1$d）。</string>
-    <string name="diagnostics_fix_scope">确认模块在 LSPosed 里已启用，并且作用域包含微信输入法。作用域会按模块自己的声明自动应用，但手工改过就会覆盖它。</string>
-    <string name="diagnostics_fix_restart">装模块的时候，微信输入法的键盘进程已经起来了，Hook 没能进到那个进程。用上面的「重启微信输入法」。</string>
+    <string name="diagnostics_fix_scope">如果微信输入法已经重启过、这里仍然是空的，请核对两件事：模块在 LSPosed 里已启用、作用域包含微信输入法；以及你的 LSPosed 是 2.2 或更新版本（libxposed API %1$d）—— 更旧的框架会拒绝加载本模块，而且什么都不说。</string>
+    <string name="diagnostics_manager_absent">未安装</string>
+    <string name="diagnostics_fix_restart">装模块的时候，微信输入法的键盘进程已经起来了，Hook 没能进到那个进程。强停一次微信输入法（设置页有「重启微信输入法」），再打开键盘。</string>
+    <string name="diagnostics_fix_hooks">有 Hook 没能装上。如果你刚安装或更新完本模块，请强停一次微信输入法 —— Hook 是在它的进程启动时挂上去的，模块在运行中被更新时，得等进程重启才完整生效。如果重启后这份列表还在，多半是这个微信输入法版本改了这些 Hook 所针对的方法名，需要等模块更新。</string>
     <string name="diagnostics_fix_host">本模块是按微信输入法 %1$s 适配的，你当前装的是 %2$s。那些靠宿主内部名字定位的 Hook 可能不会生效。</string>
     <string name="diagnostics_fix_ime">微信输入法当前不是本机使用的输入法。</string>
     <string name="diagnostics_refresh">刷新</string>
+    <string name="diagnostics_refreshing">正在问微信输入法…</string>
     <string name="diagnostics_clear">清除已存的上报</string>
     <string name="diagnostics_cleared">已清除上报</string>
 
     <!-- 日志 -->
     <string name="section_log">日志</string>
-    <string name="log_desc">模块在微信输入法里写下的全部日志，早的在前面。读取需要 root 权限。</string>
-    <string name="log_loading">正在读取日志…</string>
-    <string name="log_empty">还没有日志。先打开一次微信输入法，再回来刷新。</string>
-    <string name="log_no_root">root 权限被拒绝了，读不到日志。给本应用授权 root 后刷新。</string>
-    <string name="log_failed">读取日志失败：%1$s</string>
+    <string name="log_desc">模块在微信输入法进程里写下的最近日志，早的在前面。刷新时会向运行中的模块要一份最新的，不需要 root。</string>
+    <string name="log_empty">还没收到任何上报。先打开一次微信输入法，再回来刷新。</string>
     <string name="log_refresh">刷新</string>
-    <string name="log_clear">清空</string>
-    <string name="log_cleared">日志已清空</string>
     <string name="log_copy">复制</string>
     <string name="log_copied">日志已复制</string>
-    <string name="log_truncated">只显示最后 %1$d 行。</string>
+    <string name="log_truncated">只显示最后 %1$d 行；复制会取全部。</string>
 
     <!-- 关于 -->
     <string name="about_version">版本 %1$s</string>

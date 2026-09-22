@@ -8,27 +8,23 @@ import android.net.Uri
 import android.os.Bundle
 import cn.dsr213.wetypeplus.AppSettings
 import cn.dsr213.wetypeplus.KeyboardSettings
-import cn.dsr213.wetypeplus.ModuleStatus
-import cn.dsr213.wetypeplus.ModuleStatusStore
 
 /**
- * The process boundary.
+ * The process boundary, as it was first imagined.
  *
- * The keyboard hooks are injected into WeType's process, which runs as a different uid and can
- * therefore neither read this app's private preferences nor be handed a `Context` for it. Two
- * ways out of that exist: push the whole settings UI into the host's process (what embedding a
- * dialog there amounts to), or expose the values over a normal Android IPC boundary.
+ * A `ContentProvider` is the documented way to expose a couple of values from one app to another,
+ * and for a while this class was the whole cross-process story: the hooks inside WeType queried
+ * it, and [call] carried the module's status report back. Then it was measured on a real device
+ * and found to be unreachable, because Android filters provider *authority resolution* by package
+ * visibility and the host neither lists this app in its `<queries>` nor can be made to. The call
+ * fails with `IllegalArgumentException: Unknown authority`, in both directions.
  *
- * This is the second one. It needs no shared storage, no root and no host internals; it is the
- * documented mechanism for exactly this problem, and it lets the settings screen be an ordinary
- * activity in an ordinary process.
- *
- * Two directions travel over it, both narrow:
- *
- * * `query` returns one row of two 0/1 columns - the switch states the hooks need to read.
- * * `call` accepts one status report from the host process and stores it for the diagnostics
- *   screen. Nothing here is read back by the hooks, so a forged or garbled report can only
- *   mislead the *display*; it cannot change how the keyboard behaves.
+ * So what is left here is one direction and no promises: [query] still answers, for any caller that
+ * *can* reach it - a non-Android app, a shell, or a future host that happens to see this app. The
+ * hooks do not depend on it; they read the same values over the broadcast channel and the
+ * framework's remote file, and [SettingsBridge] records what each one is worth. The report half was
+ * deleted outright rather than left as a dead fallback, because a fallback that has never once
+ * worked is worse than no fallback at all.
  */
 class SettingsProvider : ContentProvider() {
 
@@ -37,9 +33,6 @@ class SettingsProvider : ContentProvider() {
 
         /** Kept as a field so existing call sites read the same way they always have. */
         val CONTENT_URI: Uri = SettingsBridge.CONTENT_URI
-
-        /** Result of [call]: `true` when the report was understood and stored. */
-        const val RESULT_ACCEPTED = "accepted"
     }
 
     override fun onCreate(): Boolean = true
@@ -63,29 +56,6 @@ class SettingsProvider : ContentProvider() {
         return columns
     }
 
-    /**
-     * Receives the module's status report from WeType's process.
-     *
-     * Runs on a binder thread, so the synchronous store write below cannot stall this app's main
-     * thread. A wire-version mismatch is refused rather than decoded: it means the module half and
-     * the app half of an upgrade were installed at different times, and reading it as the current
-     * shape would put nonsense on screen.
-     *
-     * The call is unauthenticated. That is deliberate - the host process holds no permission this
-     * app could ask for, and the only thing at stake is what the diagnostics screen shows.
-     */
-    override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
-        if (method != SettingsBridge.METHOD_REPORT) return null
-        val context = context ?: return null
-        val report = extras ?: return null
-        val accepted = report.getInt(SettingsBridge.KEY_WIRE_VERSION, 0) ==
-            SettingsBridge.WIRE_VERSION
-        if (accepted) {
-            ModuleStatusStore.write(context, ModuleStatus.fromReport(report))
-        }
-        return Bundle().apply { putBoolean(RESULT_ACCEPTED, accepted) }
-    }
-
     override fun getType(uri: Uri): String? = null
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
@@ -98,4 +68,12 @@ class SettingsProvider : ContentProvider() {
         selection: String?,
         selectionArgs: Array<out String>?
     ): Int = 0
+
+    /**
+     * Present only because `ContentProvider` declares it abstract.
+     *
+     * The report used to arrive here. It arrives at [BridgeReceiver] now, for the reason in the
+     * class comment.
+     */
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle? = null
 }

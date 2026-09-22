@@ -26,7 +26,22 @@ data class ModuleStatus(
     val processName: String,
     val hostVersion: String,
     val installed: List<String>,
-    val failed: List<String>
+    val failed: List<String>,
+    /**
+     * The module's own recent log lines, oldest first, exactly as the host's log holds them.
+     *
+     * These travel inside the report because the module has nowhere else to put them that this app
+     * can reach: WeType's uid owns neither this app's storage nor the framework's log directory.
+     * Carrying them here is what makes a usable bug report possible without root.
+     */
+    val logLines: List<String> = emptyList(),
+    /**
+     * Which channel supplied the switches in force inside the host, and what they are.
+     *
+     * Empty when the report came from a module version that did not send it, which reads the same
+     * as "unknown" on screen - the honest answer for an older module half.
+     */
+    val settingsSummary: String = ""
 ) {
     /**
      * True when the framework is older than the module's own `minApiVersion`.
@@ -47,37 +62,67 @@ data class ModuleStatus(
 
     companion object {
         fun fromReport(bundle: Bundle): ModuleStatus = ModuleStatus(
-            timestamp = bundle.getLong(SettingsBridge.KEY_TIMESTAMP, 0L),
-            frameworkName = bundle.getString(SettingsBridge.KEY_FRAMEWORK_NAME).orEmpty(),
-            frameworkVersion = bundle.getString(SettingsBridge.KEY_FRAMEWORK_VERSION).orEmpty(),
-            frameworkVersionCode =
-                bundle.getLong(SettingsBridge.KEY_FRAMEWORK_VERSION_CODE, 0L),
-            apiVersion = bundle.getInt(SettingsBridge.KEY_API_VERSION, 0),
-            requiredApiVersion = bundle.getInt(
+            timestamp = bundle.longOr(SettingsBridge.KEY_TIMESTAMP, 0L),
+            frameworkName = bundle.stringOr(SettingsBridge.KEY_FRAMEWORK_NAME),
+            frameworkVersion = bundle.stringOr(SettingsBridge.KEY_FRAMEWORK_VERSION),
+            frameworkVersionCode = bundle.longOr(SettingsBridge.KEY_FRAMEWORK_VERSION_CODE, 0L),
+            apiVersion = bundle.intOr(SettingsBridge.KEY_API_VERSION, 0),
+            requiredApiVersion = bundle.intOr(
                 SettingsBridge.KEY_MIN_API_VERSION,
                 SettingsBridge.REQUIRED_API_VERSION
             ),
-            processName = bundle.getString(SettingsBridge.KEY_PROCESS_NAME).orEmpty(),
-            hostVersion = bundle.getString(SettingsBridge.KEY_HOST_VERSION).orEmpty(),
-            installed = bundle.getStringArrayList(SettingsBridge.KEY_INSTALLED).sanitized(),
-            failed = bundle.getStringArrayList(SettingsBridge.KEY_FAILED).sanitized()
+            processName = bundle.stringOr(SettingsBridge.KEY_PROCESS_NAME),
+            hostVersion = bundle.stringOr(SettingsBridge.KEY_HOST_VERSION),
+            installed = bundle.stringListOr(SettingsBridge.KEY_INSTALLED),
+            failed = bundle.stringListOr(SettingsBridge.KEY_FAILED),
+            logLines = bundle.logListOr(SettingsBridge.KEY_LOG),
+            settingsSummary = bundle.stringOr(SettingsBridge.KEY_SETTINGS)
+                .take(MAX_LABEL_LENGTH)
         )
-
-        /**
-         * Bounds what an unauthenticated binder call can put on screen.
-         *
-         * The report crosses from another process over a provider any app may call, so neither the
-         * number of entries nor their length is trustworthy. These caps sit far above what an
-         * honest report carries - the hook installer produces a couple of dozen labels - and exist
-         * only so that a hostile bundle cannot turn the diagnostics screen into a memory sink.
-         */
-        private fun List<String>?.sanitized(): List<String> =
-            this.orEmpty().take(MAX_HOOK_LABELS).map { it.take(MAX_LABEL_LENGTH) }
-
-        private const val MAX_HOOK_LABELS = 256
-        private const val MAX_LABEL_LENGTH = 200
     }
 }
+
+/**
+ * Bounds on what an unauthenticated report can put on screen.
+ *
+ * The report crosses from another app's process, over a channel any app can send to, so neither
+ * the number of entries nor their length is trustworthy. These caps sit far above what an honest
+ * report carries - a couple of dozen hook labels, a few hundred log lines - and exist only so that
+ * a hostile bundle cannot turn the diagnostics screen into a memory sink.
+ */
+private const val MAX_HOOK_LABELS = 256
+private const val MAX_LABEL_LENGTH = 200
+private const val MAX_LOG_LINES = 400
+private const val MAX_LOG_LINE_LENGTH = 400
+
+/**
+ * Readers that cannot throw, for a bundle written by another process.
+ *
+ * `Bundle.get*` throws on a type mismatch rather than returning the default, and a mismatch is
+ * entirely reachable here: any app can send to this receiver, and an older or newer module half
+ * legitimately writes a different shape. A malformed report should degrade to an empty row, not
+ * take down the screen that exists to explain problems.
+ */
+private fun Bundle.stringOr(key: String): String =
+    runCatching { getString(key) }.getOrNull().orEmpty()
+
+private fun Bundle.longOr(key: String, fallback: Long): Long =
+    runCatching { getLong(key, fallback) }.getOrDefault(fallback)
+
+private fun Bundle.intOr(key: String, fallback: Int): Int =
+    runCatching { getInt(key, fallback) }.getOrDefault(fallback)
+
+private fun Bundle.stringListOr(key: String): List<String> =
+    runCatching { getStringArrayList(key) }.getOrNull()
+        .orEmpty()
+        .take(MAX_HOOK_LABELS)
+        .map { it.take(MAX_LABEL_LENGTH) }
+
+private fun Bundle.logListOr(key: String): List<String> =
+    runCatching { getStringArrayList(key) }.getOrNull()
+        .orEmpty()
+        .take(MAX_LOG_LINES)
+        .map { it.take(MAX_LOG_LINE_LENGTH) }
 
 /**
  * The release part of a version string: its first three dot-separated segments.
@@ -99,10 +144,10 @@ internal fun releaseSegment(version: String): String =
 /**
  * Persists the module's last report.
  *
- * A plain private `SharedPreferences` file, written by the provider (in this app's process) and
- * read by the settings screen. Nothing here is writable from outside the app beyond the one
- * provider method that produces it, and the values are display-only - the hooks never read this
- * file, so a stale or missing report can never change how the keyboard behaves.
+ * A plain private `SharedPreferences` file, written by [cn.dsr213.wetypeplus.bridge.BridgeReceiver]
+ * and read by the settings screen. Nothing here is writable from outside the app beyond that one
+ * receiver, and every value is display-only - the hooks never read this file, so a stale or forged
+ * report can never change how the keyboard behaves.
  */
 object ModuleStatusStore {
     private const val PREFS_NAME = "wetype_plus_status"
@@ -117,8 +162,10 @@ object ModuleStatusStore {
     private const val KEY_HOST_VERSION = "host_version"
     private const val KEY_INSTALLED = "installed"
     private const val KEY_FAILED = "failed"
+    private const val KEY_LOG = "log"
+    private const val KEY_SETTINGS = "settings"
 
-    /** Hook labels never contain a newline, so one separator round-trips them losslessly. */
+    /** Labels and log lines never contain a newline, so one separator round-trips them losslessly. */
     private const val SEPARATOR = "\n"
 
     fun read(context: Context): ModuleStatus? {
@@ -138,7 +185,9 @@ object ModuleStatusStore {
             processName = preferences.getString(KEY_PROCESS_NAME, "").orEmpty(),
             hostVersion = preferences.getString(KEY_HOST_VERSION, "").orEmpty(),
             installed = preferences.getString(KEY_INSTALLED, "").orEmpty().splitToList(),
-            failed = preferences.getString(KEY_FAILED, "").orEmpty().splitToList()
+            failed = preferences.getString(KEY_FAILED, "").orEmpty().splitToList(),
+            logLines = preferences.getString(KEY_LOG, "").orEmpty().splitToList(),
+            settingsSummary = preferences.getString(KEY_SETTINGS, "").orEmpty()
         )
     }
 
@@ -152,9 +201,9 @@ object ModuleStatusStore {
         if (existing != null && existing.fromKeyboardProcess && !status.fromKeyboardProcess) {
             return
         }
-        // `commit` rather than `apply`: the caller is a binder thread finishing a one-shot report,
-        // and losing it because the process died before the async write landed would leave the user
-        // staring at "no report" with no way to know a report had been sent.
+        // `commit` rather than `apply`: the caller is a broadcast receiver that is about to return,
+        // after which this process may be frozen, and losing the report there would leave the user
+        // staring at "no report" with no way to know one had arrived.
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putLong(KEY_TIMESTAMP, status.timestamp)
@@ -167,6 +216,8 @@ object ModuleStatusStore {
             .putString(KEY_HOST_VERSION, status.hostVersion)
             .putString(KEY_INSTALLED, status.installed.joinToString(SEPARATOR))
             .putString(KEY_FAILED, status.failed.joinToString(SEPARATOR))
+            .putString(KEY_LOG, status.logLines.joinToString(SEPARATOR))
+            .putString(KEY_SETTINGS, status.settingsSummary)
             .commit()
     }
 

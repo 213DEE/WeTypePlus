@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import cn.dsr213.wetypeplus.AppSettings
 import cn.dsr213.wetypeplus.EnvironmentProbe
 import cn.dsr213.wetypeplus.ModuleStatus
 import cn.dsr213.wetypeplus.ModuleStatusStore
@@ -37,6 +38,7 @@ import cn.dsr213.wetypeplus.R
 import cn.dsr213.wetypeplus.bridge.SettingsBridge
 import cn.dsr213.wetypeplus.releaseSegment
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
@@ -58,14 +60,24 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Upper bound on how many log records are rendered.
+ * Upper bound on how many log lines are rendered.
  *
- * The reader hands back up to a few thousand matching lines, which is the right amount to *keep*
- * and the wrong amount to lay out: every line is a composable, and past a point the only thing a
- * longer list buys is a slower screen. The tail is what matters - the module reports once, early,
- * and the newest boot is the interesting one.
+ * The report carries up to four hundred, which is the right amount to *keep* and the wrong amount
+ * to lay out: they are rendered inside a single card, so every one of them is composed whether or
+ * not it is visible. The tail is what matters - the module reports once, early, and the newest
+ * boot is the interesting one - and the copy action still copies everything.
  */
-private const val MAX_RENDERED_LOG_LINES = 400
+private const val MAX_RENDERED_LOG_LINES = 150
+
+/**
+ * How long to wait for the host's answer before reading the report back.
+ *
+ * The reply is a broadcast, and the host builds it on a thread of its own so that a cold start of
+ * WeType is never held up by reporting. That is normally tens of milliseconds, plus however long
+ * Android takes to schedule the delivery; a second is generous without making the button feel
+ * broken, and the cost of waiting too long is only a slightly stale screen.
+ */
+private const val REPORT_WAIT_MS = 1_200L
 
 /**
  * The diagnostics page.
@@ -73,14 +85,18 @@ private const val MAX_RENDERED_LOG_LINES = 400
  * It exists because of one specific failure, the one that produced every "installed it, nothing
  * happens" report: the module can be present, enabled and switched on in the framework manager,
  * and still do nothing at all. Nothing crashes, nothing is logged to the user, and from the
- * outside it is indistinguishable from a module that was never installed. The two causes are a
- * framework below the declared `minApiVersion` (which refuses to load the module silently) and a
+ * outside it is indistinguishable from a module that was never installed. The causes are a
+ * framework below the declared `minApiVersion` (which declines to load the module, silently), a
  * host process that was already running when the module was installed (the hooks are injected at
- * process fork, so they never arrive).
+ * process fork, so they never arrive), and a host build whose internal method names have moved.
  *
- * Neither is visible from this app's own process, which is why the module reports what it saw from
- * *inside* WeType and this screen reads that report rather than guessing. When no report has
+ * None of that is visible from this app's own process, which is why the module reports what it saw
+ * from *inside* WeType and this screen reads that report rather than guessing. When no report has
  * arrived, that absence is itself the finding, and the screen says which of the causes to check.
+ *
+ * The report is also where the module's log comes from. Its lines also land in the framework's own
+ * log file, but those are root-only, and a user asking for help should not have to hand an app
+ * root to send a few lines of text.
  */
 @Composable
 internal fun DiagnosticsScreen(onBack: () -> Unit) {
@@ -89,16 +105,19 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     var status by remember { mutableStateOf(ModuleStatusStore.read(context)) }
-    var logResult by remember { mutableStateOf<LogReader.Result?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
     var refreshToken by remember { mutableStateOf(0) }
 
-    // Reading the log shells out to `su`, so it never runs on the main thread. Keying the effect
-    // on `refreshToken` is what makes the refresh button work: bumping it re-runs the read without
-    // needing to cancel anything, because the previous read has already returned by the time a
-    // human can tap again.
+    // The screen's one refresh path, and it runs on open as well as on the button: what the module
+    // did when WeType last started is history, and the question people actually arrive with is
+    // whether it is working *now*. The stored report is shown first, so the page is never blank
+    // while the answer is in flight.
     LaunchedEffect(refreshToken) {
-        logResult = null
-        logResult = withContext(Dispatchers.IO) { LogReader.read() }
+        refreshing = true
+        AppSettings.askHostForReport(context)
+        delay(REPORT_WAIT_MS)
+        status = withContext(Dispatchers.IO) { ModuleStatusStore.read(context) }
+        refreshing = false
     }
 
     val manager = remember(refreshToken) { EnvironmentProbe.frameworkManager(context) }
@@ -113,6 +132,7 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
         ?: status?.hostVersion?.takeIf { it.isNotBlank() }
     val hostMismatch = actualHostVersion != null &&
         releaseSegment(actualHostVersion) != releaseSegment(SettingsBridge.VERIFIED_HOST_VERSION)
+    val logLines = status?.logLines.orEmpty()
 
     Scaffold(
         modifier = Modifier
@@ -206,7 +226,7 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                                 label = stringResource(R.string.diagnostics_label_manager),
                                 value = manager?.versionName
                                     ?.takeIf { it.isNotBlank() }
-                                    ?: stringResource(R.string.diagnostics_unknown)
+                                    ?: stringResource(R.string.diagnostics_manager_absent)
                             )
                             HorizontalDivider()
                             InfoRow(
@@ -255,6 +275,16 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                                     )
                                 } ?: stringResource(R.string.diagnostics_unknown)
                             )
+                            HorizontalDivider()
+                            // Which channel the switches actually reached the keyboard through. A
+                            // switch that is stored but never read is exactly the bug this row is
+                            // here to make visible, and only the host process can answer it.
+                            InfoRow(
+                                label = stringResource(R.string.diagnostics_label_switches),
+                                value = status?.settingsSummary
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: stringResource(R.string.diagnostics_unknown)
+                            )
                         }
                     }
                 }
@@ -263,7 +293,6 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
 
                 val hints = collectHints(
                     status = status,
-                    managerMissing = manager == null,
                     imePackage = imePackage,
                     hostIsIme = hostIsIme,
                     hostMismatch = hostMismatch
@@ -340,19 +369,22 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             TextButton(
-                                text = stringResource(R.string.diagnostics_refresh),
-                                onClick = {
-                                    status = ModuleStatusStore.read(context)
-                                    refreshToken += 1
-                                },
-                                modifier = Modifier.weight(1f)
+                                text = stringResource(
+                                    if (refreshing) {
+                                        R.string.diagnostics_refreshing
+                                    } else {
+                                        R.string.diagnostics_refresh
+                                    }
+                                ),
+                                onClick = { refreshToken += 1 },
+                                modifier = Modifier.weight(1f),
+                                enabled = !refreshing
                             )
                             TextButton(
                                 text = stringResource(R.string.diagnostics_clear),
                                 onClick = {
                                     ModuleStatusStore.clear(context)
                                     status = null
-                                    refreshToken += 1
                                     Toast.makeText(
                                         context,
                                         R.string.diagnostics_cleared,
@@ -389,18 +421,27 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 TextButton(
-                                    text = stringResource(R.string.log_refresh),
+                                    text = stringResource(
+                                        if (refreshing) {
+                                            R.string.diagnostics_refreshing
+                                        } else {
+                                            R.string.log_refresh
+                                        }
+                                    ),
                                     onClick = { refreshToken += 1 },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !refreshing
                                 )
-                                val lines = (logResult as? LogReader.Result.Lines)?.value.orEmpty()
                                 TextButton(
                                     text = stringResource(R.string.log_copy),
                                     onClick = {
+                                        // The whole log, not the rendered tail: the copy action is
+                                        // what travels into a bug report, and a report that stops
+                                        // at whatever fitted on screen is worse than useless.
                                         copyToClipboard(
                                             context,
                                             context.getString(R.string.section_log),
-                                            lines.joinToString("\n")
+                                            logLines.joinToString("\n")
                                         )
                                         Toast.makeText(
                                             context,
@@ -409,76 +450,45 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
                                         ).show()
                                     },
                                     modifier = Modifier.weight(1f),
-                                    enabled = lines.isNotEmpty()
-                                )
-                                TextButton(
-                                    text = stringResource(R.string.log_clear),
-                                    onClick = {
-                                        // Cleared on a worker thread for the same reason it is read
-                                        // there, and the list is re-read afterwards so the screen
-                                        // cannot show lines the user just removed.
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) { LogReader.clear() }
-                                            refreshToken += 1
-                                            Toast.makeText(
-                                                context,
-                                                R.string.log_cleared,
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f)
+                                    enabled = logLines.isNotEmpty()
                                 )
                             }
                         }
                     }
                 }
 
-                when (val result = logResult) {
-                    null -> item { LogMessage(stringResource(R.string.log_loading)) }
-                    is LogReader.Result.NoRoot -> item {
-                        LogMessage(stringResource(R.string.log_no_root))
-                    }
-
-                    is LogReader.Result.Failure -> item {
-                        LogMessage(stringResource(R.string.log_failed, result.message))
-                    }
-
-                    is LogReader.Result.Lines -> {
-                        if (result.value.isEmpty()) {
-                            item { LogMessage(stringResource(R.string.log_empty)) }
-                        } else {
-                            val shown = result.value.takeLast(MAX_RENDERED_LOG_LINES)
-                            item {
-                                Card(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    insideMargin = PaddingValues(0.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        if (shown.size < result.value.size) {
-                                            Text(
-                                                text = stringResource(
-                                                    R.string.log_truncated,
-                                                    shown.size
-                                                ),
-                                                style = MiuixTheme.textStyles.body2,
-                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                            )
-                                        }
-                                        shown.forEach { line ->
-                                            Text(
-                                                text = line,
-                                                style = MiuixTheme.textStyles.body2,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                            )
-                                        }
-                                    }
+                if (logLines.isEmpty()) {
+                    item { LogMessage(stringResource(R.string.log_empty)) }
+                } else {
+                    val shown = logLines.takeLast(MAX_RENDERED_LOG_LINES)
+                    item {
+                        Card(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            insideMargin = PaddingValues(0.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (shown.size < logLines.size) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.log_truncated,
+                                            shown.size
+                                        ),
+                                        style = MiuixTheme.textStyles.body2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                    )
+                                }
+                                shown.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        style = MiuixTheme.textStyles.body2,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                    )
                                 }
                             }
                         }
@@ -498,16 +508,15 @@ internal fun DiagnosticsScreen(onBack: () -> Unit) {
  */
 private enum class Hint {
     FrameworkTooOld,
-    NoManager,
     Scope,
     Restart,
+    HooksMissing,
     HostMismatch,
     NotDefaultIme
 }
 
 private fun collectHints(
     status: ModuleStatus?,
-    managerMissing: Boolean,
     imePackage: String?,
     hostIsIme: Boolean,
     hostMismatch: Boolean
@@ -515,14 +524,18 @@ private fun collectHints(
     if (status == null) {
         // No report at all. Two readings, and the screen cannot tell them apart from this side:
         // either the framework declined to load the module, or it loaded somewhere that never
-        // reports. Both are answered by the same two checks, so both are offered.
-        if (managerMissing) add(Hint.NoManager) else add(Hint.Scope)
+        // reports. The first advice covers both, so the second is only about the timing.
+        add(Hint.Scope)
         add(Hint.Restart)
     } else {
         if (status.frameworkTooOld) add(Hint.FrameworkTooOld)
         // A report from the host's main process is a half-answer: the hooks were installed, but in
         // the wrong process - the keyboard lives in `:hld`, which was already running.
         if (!status.fromKeyboardProcess) add(Hint.Restart)
+        // Named separately from the process hint because the reading is different: these hooks did
+        // reach the process they belong to and could not be installed once they got there, which is
+        // what a module updated under a running WeType looks like from the inside.
+        if (status.failed.isNotEmpty()) add(Hint.HooksMissing)
     }
     // Read off whichever source answered, report or package probe, so a stale report cannot hide a
     // host that was updated after it was written.
@@ -537,9 +550,9 @@ private fun collectHints(
 @Composable
 private fun Hint.text(requiredApi: Int, actualHostVersion: String?): String = when (this) {
     Hint.FrameworkTooOld -> stringResource(R.string.diagnostics_fix_framework, requiredApi)
-    Hint.NoManager -> stringResource(R.string.diagnostics_fix_no_manager, requiredApi)
-    Hint.Scope -> stringResource(R.string.diagnostics_fix_scope)
+    Hint.Scope -> stringResource(R.string.diagnostics_fix_scope, requiredApi)
     Hint.Restart -> stringResource(R.string.diagnostics_fix_restart)
+    Hint.HooksMissing -> stringResource(R.string.diagnostics_fix_hooks)
     Hint.HostMismatch -> stringResource(
         R.string.diagnostics_fix_host,
         SettingsBridge.VERIFIED_HOST_VERSION,

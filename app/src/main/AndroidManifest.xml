@@ -15,6 +15,14 @@
         <package android:name="io.github.lsposed.manager" />
     </queries>
 
+    <!--
+      Note for anyone tempted to reach for `android:forceQueryable` here: it does not help. It
+      governs PackageManager lookups, not the provider authority resolution that decides whether
+      the host's `contentResolver.call` can find this app at all - tried on Android 16, still
+      "Unknown authority". Reaching across the process boundary is done with broadcasts instead:
+      an intent that names its destination needs no resolution, and therefore no visibility. See
+      `SettingsBridge`.
+    -->
     <application
         android:allowBackup="true"
         android:description="@string/xposed_description"
@@ -36,9 +44,29 @@
         </activity>
 
         <!--
-          Carries the settings across the process boundary. The keyboard hooks run inside
-          WeType's process and cannot read this app's private preferences directly, so they
-          read them through this provider instead. It exposes two booleans and nothing else.
+          The half of the cross-process channel that lives in this app's process: the module's
+          status reports arrive here, and the host's request for the switches is answered here.
+          Addressed by explicit component from inside WeType, which is the only shape that survives
+          package-visibility filtering when the sender is another app.
+
+          It is exported because the sender is a different app, and there is deliberately no
+          intent filter: without one, only a sender that already knows this class name can reach
+          it, which is as narrow as an exported receiver gets. What will arrive is a status report
+          and a settings request; both are bounded to two booleans and display-only text, and
+          neither can change how the module behaves beyond the switches the user set the last time
+          this app ran.
+        -->
+        <receiver
+            android:name=".bridge.BridgeReceiver"
+            android:exported="true" />
+
+        <!--
+          Carries the settings across the process boundary for any caller that can reach it. The
+          keyboard hooks run inside WeType's process and cannot read this app's private
+          preferences directly, but they do *not* depend on this provider: measured on Android 16,
+          the host's provider resolution fails with "Unknown authority". Kept because it costs
+          nothing and answers correctly for callers that are not affected by the host's package
+          visibility - it exposes two booleans and nothing else.
         -->
         <provider
             android:name=".bridge.SettingsProvider"
