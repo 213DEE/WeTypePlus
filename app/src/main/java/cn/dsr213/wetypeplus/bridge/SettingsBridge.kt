@@ -86,16 +86,27 @@ object SettingsBridge {
     )
 
     /**
-     * The WeType release every host-dependent hook in this project was reverse-engineered against.
+     * The WeType release this module was last verified against on a real device.
      *
-     * Two fields, because they answer different questions. `versionName` is what a user can read
-     * off their own screen and what this project used to record - but it reads `3.5.3`, shared
-     * across builds, so it cannot identify a build on its own. `versionCode` (`56201`) is the one
-     * that does, and it is what the comparison actually uses.
+     * Two fields, because they answer different questions. `versionName` is what a user reads off
+     * their own screen, and it is what the diagnostics comparison keys on. `versionCode` is what
+     * actually identifies a build (`3.5.3` = `56201`, `3.5.4` = `57201`); recorded for reports and
+     * for telling two builds of the same name apart, not used as the comparison key, because one
+     * number cannot say "older or newer, by release".
+     *
+     * ⚠️ **This is a label, not a gate.** Nothing in this module declines to run because the host
+     * version differs - there is no version check anywhere in the hook path. The hooks resolve the
+     * host's obfuscated class names by member signature (`hook/HostNames.kt`) and fail individually,
+     * by name, when a target really is gone. This value only decides whether the diagnostics screen
+     * reads "verified" or warns that the running build is untested.
+     *
+     * History: `3.5.3` through 1.0.26. `3.5.4` renamed the whole `utils` class family
+     * (`m1` -> `n1`, `i1` -> `j1`, `Z0` -> `a1`) and cost 12 of 24 hooks until 1.0.27 learned to
+     * resolve them; see `HostNames` for the mapping and for why a plain name lookup is not enough.
      */
-    const val VERIFIED_HOST_VERSION = "3.5.3"
+    const val VERIFIED_HOST_VERSION = "3.5.4"
 
-    const val VERIFIED_HOST_VERSION_CODE = 56201L
+    const val VERIFIED_HOST_VERSION_CODE = 57201L
 
     /**
      * The lowest libxposed API this module can run on, mirroring `module.prop`'s `minApiVersion`.

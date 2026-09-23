@@ -9,10 +9,17 @@ import cn.dsr213.wetypeplus.bridge.sameAs
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-private const val UTILS = "com.tencent.wetype.plugin.hld.utils."
+/**
+ * ⚠️ **The `m1`-flavoured names in the KDoc below are historical, not literals.**
+ *
+ * Every class this module needs out of the host's `utils` package is looked up through [HostNames],
+ * because the host renames them: WeType 3.5.4 moved `m1` -> `n1`, `i1` -> `j1` and `Z0` -> `a1`,
+ * while keeping the method names. The comments keep the names the reverse engineering was done
+ * against, because that is what the analysis in the knowledge base refers to.
+ */
 
-/** `m1` - WxImeUIUtil, the single source of every keyboard size constant. */
-private const val M1 = "${UTILS}m1"
+/** `m1` up to 3.5.3, `n1` from 3.5.4 - WxImeUIUtil, the single source of every keyboard size constant. */
+private val M1 get() = HostNames.widthUtil
 
 /**
  * `m1$b` - literally the `AppScreenWidthCacheItem`. It is the instance held by `m1.K`, i.e. the
@@ -21,7 +28,7 @@ private const val M1 = "${UTILS}m1"
  * Note it does **not** declare `d(boolean)`; that lives on the shared base. The class is therefore
  * used here only as an identity token, to tell the width item apart from its siblings.
  */
-private const val M1_SCREEN_WIDTH = "${UTILS}m1\$b"
+private val M1_SCREEN_WIDTH get() = HostNames.widthItem
 
 /**
  * `m1$h0` - the cache base shared by `m1$b` (width), `m1$a` (height), `m1$Y` and `m1$W`.
@@ -34,7 +41,7 @@ private const val M1_SCREEN_WIDTH = "${UTILS}m1\$b"
  * The sibling `m1$a` resolves through `m1$a$a.a()`, whose own log string is
  * `"AppScreenHeightCacheItem:"` - so anything keyed off that helper is the *height*, not the width.
  */
-private const val M1_WIDTH_CACHE_BASE = "${UTILS}m1\$h0"
+private val M1_WIDTH_CACHE_BASE get() = HostNames.widthCacheBase
 
 /**
  * `m1.g1()` - the one scale factor every keyboard width figure is multiplied by.
@@ -68,8 +75,8 @@ private const val FLOAT_SINGLETON = "com.tencent.wetype.plugin.hld.float.f"
 /** `model.Q` - the per-scenario keyboard padding model ("adjust keyboard size"). */
 private const val PADDING_MODEL = "com.tencent.wetype.plugin.hld.model.Q"
 
-/** `Z0` - holds `P1()` (split keyboard) and `V3(Z)` (its setter), both used by the exclusion hook. */
-private const val PADDING_GATE = "${UTILS}Z0"
+/** `Z0` up to 3.5.3, `a1` from 3.5.4 - holds `P1()` (split keyboard) and `V3(Z)`, its setter. */
+private val PADDING_GATE get() = HostNames.paddingGate
 
 /** `adjust.b` - `ImeAdjustViewMgr`; the *single* entry point of the "adjust keyboard size" panel. */
 private const val ADJUST_MANAGER = "com.tencent.wetype.plugin.hld.adjust.b"
@@ -190,26 +197,19 @@ private const val ADJUST_ARG_COUNT = 5
 private const val ADJUST_LEFT_INDEX = 1
 private const val ADJUST_RIGHT_INDEX = 2
 
-/** How many distinct `k2()` / `Y2()` states get a "Single-hand gate:" line. */
+/** How many distinct gate states get a "Single-hand gate:" line. */
 private const val GATE_TRACE_LIMIT = 24
 
-/** `i1`'s single-hand setter and `Z0`'s split-keyboard setter, kept mutually exclusive. */
-private const val SINGLE_HAND_SETTER = "a5"
-private const val SPLIT_SETTER = "V3"
-
-/** The host's own single-hand preference key - `i1.k2()`'s fourth condition. */
-private const val SINGLE_HAND_SETTING = "ime_enable_single_hand_mode"
-
 /**
- * `i1.B(String, boolean)` - the settings reader `k2()` uses for that key.
+ * The host's own preferences that name the single-hand and split-keyboard members.
  *
- * [CORRECTION 2026-09-21] This was `"C"`. There is no `i1.C(String, boolean)`: `C` exists only as
- * the Kotlin default-argument bridge `C(i1, String, boolean, int, Object)`, which forwards to `B`.
- * Invoking `C` with two arguments therefore threw, `userOn` came back `null` in every
- * "Single-hand gate:" report, and the one condition that actually decides whether the mode is on
- * was the one condition never visible.
+ * These are **anchors**, not names. R8 renames symbols and never string literals, so a preference
+ * key is the one fact about this code that a host update cannot move - which is why every
+ * role-sensitive method here is resolved against a key rather than against a spelling. See
+ * [HostMethods] for the four roles and for the 3.5.4 update that made this necessary.
  */
-private const val SINGLE_HAND_SETTING_READ = "B"
+private val SINGLE_HAND_SETTING get() = HostMethods.SINGLE_HAND_KEY
+private val SPLIT_SETTING get() = HostMethods.SPLIT_KEY
 
 /**
  * The host's own "this keyboard has outgrown one-handed mode" threshold, in **dp**.
@@ -393,8 +393,8 @@ private const val VIEW_TREE_CHILDREN = 12
  * track which branch the host is on. See `hookAdjustMarginSync`.
  */
 
-/** `i1` - the host settings singleton that owns the single-hand-mode gate. */
-private const val SETTINGS = "${UTILS}i1"
+/** `i1` up to 3.5.3, `j1` from 3.5.4 - the host settings singleton that owns the single-hand gate. */
+private val SETTINGS get() = HostNames.settings
 
 /** `model.N` - the keyboard model singleton; `t0()` is the active keyboard kind id. */
 private const val KEYBOARD_MODEL = "com.tencent.wetype.plugin.hld.model.N"
@@ -419,8 +419,8 @@ private val PRIMITIVE_VOID: Class<*> = java.lang.Void.TYPE
  * m1$P.a(kb)  = min(<user ceiling> * g1(), m1.y(false))
  * ```
  */
-private const val M1_WIDTH_PROVIDER_MAIN = "${UTILS}m1\$t0"
-private const val M1_WIDTH_PROVIDER_MAX = "${UTILS}m1\$P"
+private val M1_WIDTH_PROVIDER_MAIN get() = HostNames.widthProviderMain
+private val M1_WIDTH_PROVIDER_MAX get() = HostNames.widthProviderMax
 
 /** The `keyboard.t` scene token both width providers are keyed by. */
 private const val KEYBOARD_SCENE = "com.tencent.wetype.plugin.hld.keyboard.t"
@@ -490,8 +490,52 @@ internal object WeTypeLayoutHooks {
      * Thread-local rather than a plain boolean because the input method may evaluate keyboard
      * geometry off the main thread, and a global flag would also blanket every unrelated `X1()`
      * caller.
+     *
+     * The window is opened by [hookSingleHandModeGate], which installs itself on *every* candidate
+     * spelling of a gate rather than on the one this module was last built against, so the depth
+     * below can legitimately nest.
      */
-    private val foldGateBypass = ThreadLocal.withInitial { false }
+    private val foldGateBypass: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+
+    /**
+     * How deep this thread is inside a gate candidate, so the bypass window survives nesting.
+     *
+     * Nesting is real: a gate's first two conditions call into the host's own model code, and the
+     * inner call can reach a second candidate. Clearing the window from the inner call's
+     * after-hook would close it while the outer gate is still being evaluated - which is exactly
+     * the case the bypass exists for - so the flag is only cleared when the depth returns to zero.
+     */
+    private val gateWindowDepth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
+
+    /**
+     * Depth, read the defensive way.
+     *
+     * `ThreadLocal<T>.get()` comes back as `T?` under this build's Kotlin/JDK interop even though
+     * `withInitial` guarantees a value, and an unset depth means exactly what a zero depth means -
+     * no gate is running on this thread - so the fallback states the invariant instead of hiding it.
+     */
+    private fun gateDepth(): Int = gateWindowDepth.get() ?: 0
+
+    /**
+     * The **bare method name** (`l2`) of the gate candidate currently running on this thread.
+     *
+     * This is the **resolution anchor** for [HostMethods.Role.SINGLE_HAND_GATE]. A gate is
+     * identified by reading its own preference while its window is open, and this is what says
+     * *who* was running when that read happened - no stack walk, no name assumption.
+     *
+     * ⚠️ **Bare, and it has to stay bare.** This value is handed straight to
+     * [HostMethods.resolve], and everything downstream of a role - `singleHandActive()` above all -
+     * uses it as an argument to `callOnSingleton`, which matches `Method.name` exactly. 1.0.27
+     * stored a qualified `"$SETTINGS#$methodName"` here instead, so the role resolved to `j1#l2`,
+     * `singleHandActive()` asked for a method literally named `j1#l2`, got `null` from
+     * `callOnSingleton` every time, and the whole one-handed path went dead while all 24 hooks
+     * still reported `Success`. A qualified name is display material, not an argument:
+     * [SETTINGS] is passed to `resolve` separately, for the log line.
+     *
+     * Nesting can overwrite it, which is harmless: the method that reads the key is the innermost
+     * candidate, so the value here is the one that matters.
+     */
+    private val gateWindowOwner = ThreadLocal<String?>()
 
     @Volatile
     private var cachedApplication: Application? = null
@@ -517,7 +561,13 @@ internal object WeTypeLayoutHooks {
     /** Bounded breadcrumb for the resolved padding branch / single-hand gate. */
     private val gateReportCount = AtomicInteger()
 
-    /** Last `k2()` / `Y2()` state reported, so the trace budget survives start-up. */
+    /**
+     * Cleared as soon as the single-hand gate has been anchored, so the reader probe stops doing
+     * anything on the input method's hot preference path.
+     */
+    private val anchorProbeDisarmed = AtomicBoolean()
+
+    /** Last gate state reported, so the trace budget survives start-up. */
     @Volatile
     private var lastGateTrace: String? = null
 
@@ -677,6 +727,13 @@ internal object WeTypeLayoutHooks {
         providerReportCount.set(0)
         marginSyncReportCount.set(0)
         gateReportCount.set(0)
+        anchorProbeDisarmed.set(false)
+        gateWindowDepth.remove()
+        gateWindowOwner.remove()
+        // Anchor resolutions are per generation: the method objects behind them were resolved
+        // against the class loader this instance was created with, and a hot reload brings a new
+        // one. Keeping the old answers would name methods that no longer exist in the new loader.
+        HostMethods.reset()
         resetViewReportCount.set(0)
         resetViewTreeCount.set(0)
         resetViewCopyCount.set(0)
@@ -950,10 +1007,24 @@ internal object WeTypeLayoutHooks {
             .append(" cap=").append(callM1("y", false))
             .append(" W1=").append(callM1("W1"))
             .append(" Q1=").append(callM1("Q1"))
-            .append(" P1=").append(callOnSingleton(PADDING_GATE, "a", "P1"))
+            .append(" split=").append(splitGateReading())
             .append(" g1=").append(callM1("g1"))
             .toString()
     }.getOrElse { "layoutProbe failed: $it" }
+
+    /**
+     * The split-keyboard preference, read through whichever spelling has been resolved.
+     *
+     * Labelled `split=` rather than `P1=` on purpose: this same breadcrumb already prints
+     * `n1.Q1()` as `Q1=`, and two different classes both contributing a `Q1`/`P1` to one line is how
+     * a reader ends up comparing the wrong pair. The candidate fallback covers the first pass, before
+     * the split anchor has been observed writing its key - reading an unproven spelling is read-only,
+     * so it cannot do damage even when it is the wrong preference.
+     */
+    private fun splitGateReading(): Any? {
+        val name = HostMethods.name(HostMethods.Role.SPLIT_GATE) ?: HostMethods.SPLIT_GATES.first()
+        return callOnSingleton(PADDING_GATE, "a", name)
+    }
 
     // ------------------------------------------------------------- linked side margins
 
@@ -1432,9 +1503,28 @@ internal object WeTypeLayoutHooks {
         )
     }
 
-    /** `i1.k2()` - the host's single-hand gate; in that mode the two margins are meant to differ. */
-    private fun singleHandActive(): Boolean =
-        runCatching { callOnSingleton(SETTINGS, "a", "k2") == true }.getOrDefault(false)
+    /**
+     * The host's single-hand gate - `i1.k2()` up to 3.5.3, `j1.l2()` from 3.5.4 - but only once it
+     * has proved which method it is.
+     *
+     * Answering from a name is worse than answering `false` here. 3.5.4 left `k2()` in place on the
+     * SMS-code autofill preference, and this getter decides whether the one-handed padding maths
+     * runs at all, so the stale spelling made the module lay out an ordinary two-handed keyboard as
+     * if it were one-handed. Unresolved reads as "not in one-handed mode" instead: the keyboard
+     * stays correct while the anchor is still being established, which takes one layout pass.
+     *
+     * ⚠️ **"Wrong method" and "wrong shape of name" fail identically here, and 1.0.27 hit the
+     * second one.** `HostMethods` resolved this role to `j1.l2()` correctly, but stored it
+     * qualified as `j1#l2`; `callOnSingleton` matches `Method.name`, so the lookup returned `null`,
+     * `null == true` was `false`, and all six callers of this function took the "one-handed mode is
+     * off" branch - on a keyboard where the user had it on. Spelled out because the module's own
+     * diagnostics cannot tell the two apart: every failure of this function is the same boolean,
+     * and only the gate's own trace (`resolved=` / `current=`) distinguishes them.
+     */
+    private fun singleHandActive(): Boolean = runCatching {
+        val gate = HostMethods.name(HostMethods.Role.SINGLE_HAND_GATE) ?: return@runCatching false
+        callOnSingleton(SETTINGS, "a", gate) == true
+    }.getOrDefault(false)
 
     /**
      * `adjust.b.j(Context)` - the factory that picks `ImeAdjustViewSplit` over `ImeAdjustViewSingle`.
@@ -1477,64 +1567,172 @@ internal object WeTypeLayoutHooks {
      *
      * Only the "on" direction acts, and that is also what keeps this re-entrancy-safe: the call
      * made into the *other* setter carries `false`, so that hook takes no action of its own.
+     *
+     * Both setters are found by **writing the preference they own**, never by name. 3.5.4 left
+     * `a5(Z)` and `V3(Z)` in place on methods that now write `ime_show_voice_speed`, so a call
+     * placed by name would have turned the user's voice-speed preference off and left the mode on -
+     * a silent misconfiguration in place of the intended one, with nothing in the UI to connect
+     * the two.
      */
     private fun hookHandSplitExclusion() {
-        hookBooleanSetter(SETTINGS, SINGLE_HAND_SETTER, "single-hand") {
-            callOnSingleton(PADDING_GATE, "a", SPLIT_SETTER, false)
+        // Touch the reader first so its own resolution line lands with the other install lines
+        // rather than in the middle of the first user toggle.
+        settingReader
+
+        hookAnchoredSetter(
+            owner = SETTINGS,
+            candidates = HostMethods.SINGLE_HAND_SETTERS,
+            role = HostMethods.Role.SINGLE_HAND_SETTER,
+            label = "single-hand",
+            readings = { listOf(SINGLE_HAND_SETTING to readHostPreference(SINGLE_HAND_SETTING)) }
+        ) {
+            clearOtherMode(PADDING_GATE, HostMethods.Role.SPLIT_SETTER, "split-keyboard")
         }
-        hookBooleanSetter(PADDING_GATE, SPLIT_SETTER, "split-keyboard") {
-            callOnSingleton(SETTINGS, "a", SINGLE_HAND_SETTER, false)
+
+        hookAnchoredSetter(
+            owner = PADDING_GATE,
+            candidates = HostMethods.SPLIT_SETTERS,
+            role = HostMethods.Role.SPLIT_SETTER,
+            label = "split-keyboard",
+            // `paddingGate` has the same per-key shape as `settings`, but its own generic reader is
+            // not a name this module knows, so the split key is watched through the split *gate*
+            // candidates instead. Reading an unproven candidate is harmless - it is read-only - and
+            // the pair that moves together is the pair that gets adopted.
+            readings = { HostMethods.SPLIT_GATES.map { it to callOnSingleton(PADDING_GATE, "a", it) } },
+            onEvidence = { moved -> HostMethods.resolve(HostMethods.Role.SPLIT_GATE, moved, PADDING_GATE, "followed ${HostMethods.SPLIT_KEY}") }
+        ) {
+            clearOtherMode(SETTINGS, HostMethods.Role.SINGLE_HAND_SETTER, "single-hand")
         }
     }
 
     /**
-     * Runs [onEnabled] after `className#methodName(Z)` is called with `true`.
+     * `settings`' generic `(String, boolean) -> boolean` preference reader - `i1.B` on 3.5.3,
+     * `j1.B` on 3.5.4, the same name on both.
      *
-     * The setter `Method` is resolved here rather than through `callOnSingleton`, because the hook
-     * has to be installed on the very method the host will invoke.
+     * Every per-preference getter on `settings` is a one-line wrapper around this method, which is
+     * what makes a preference *key* observable from a hook at all, and therefore what every
+     * anchor in [HostMethods] rests on. Resolved once, by name, from the candidate list.
+     *
+     * [CORRECTION 2026-09-21, re-confirmed 2026-09-23] An earlier revision called `"C"`. There is no
+     * `C(String, boolean)`: `C` exists only as the Kotlin default-argument bridge
+     * `C(settings, String, boolean, int, Object)`, which forwards here. Invoking the bridge with two
+     * arguments threw, `userOn` came back `null` in every report, and the one condition that
+     * decides whether the mode is on was the one condition never visible. The bridge is not a
+     * fallback - it is the thing to avoid.
      */
-    private fun hookBooleanSetter(
-        className: String,
-        methodName: String,
-        label: String,
-        onEnabled: () -> Unit
-    ) {
-        val owner = loadClassOrNull(className)
-        if (owner == null) {
-            Log.i("Failed: Enforce $label exclusivity - cannot resolve $className")
-            return
-        }
-        val setter = owner.declaredMethods.firstOrNull { candidate ->
-            candidate.name == methodName &&
-                candidate.parameterTypes.sameAs(PRIMITIVE_BOOLEAN) &&
-                candidate.returnType == PRIMITIVE_VOID
-        }
-        if (setter == null) {
-            Log.i("Failed: Enforce $label exclusivity - no $className#$methodName(Z)")
-            return
-        }
-        runCatching {
-            setter.isAccessible = true
-            setter.hookAfter { param ->
-                val enabled = param.args?.firstOrNull() == true
-                val trace = "$label=$enabled caller=${callerHint()}"
-                if (trace != lastSetterTrace) {
-                    lastSetterTrace = trace
-                    if (setterReportCount.incrementAndGet() <= SETTER_REPORT_LIMIT) {
-                        Log.i("Setter: $trace")
-                    }
-                }
-                if (!enabled) return@hookAfter
-                onEnabled()
-                if (exclusionReportCount.incrementAndGet() <= EXCLUSION_REPORT_LIMIT) {
-                    Log.i("Exclusion: $label enabled -> the other mode was cleared")
+    private val settingReader: String? by lazy {
+        val owner = loadClassOrNull(SETTINGS)
+        val name = owner?.let { cls ->
+            HostMethods.SETTING_READERS.firstOrNull { candidate ->
+                cls.declaredMethods.any { method ->
+                    method.name == candidate &&
+                        method.parameterTypes.size == 2 &&
+                        method.returnType == PRIMITIVE_BOOLEAN
                 }
             }
-            Log.i("Success: Enforce $label exclusivity via $className.$methodName()")
-        }.onFailure { error ->
-            Log.i("Failed: Enforce $label exclusivity via $className.$methodName()")
-            Log.i(error)
         }
+        if (name == null) {
+            Log.i("Failed: Resolve WeType settings reader on $SETTINGS ${HostMethods.SETTING_READERS}")
+        } else {
+            Log.i("Success: Resolve WeType settings reader as $SETTINGS.$name(String, boolean)")
+        }
+        name
+    }
+
+    /** Reads one host boolean preference through [settingReader], or `null` while it is unresolved. */
+    private fun readHostPreference(key: String): Any? =
+        settingReader?.let { callOnSingleton(SETTINGS, "a", it, key, false) }
+
+    /**
+     * Hooks every candidate spelling of a boolean preference's `(Z)V` setter and lets the
+     * preference decide which spelling is the real one.
+     *
+     * A `(Z)V` body gives no clue about the key it writes, so identification is by observation: the
+     * key is read before and after each candidate runs, and a candidate is adopted only when the
+     * value actually followed the argument. [onEnabled] therefore never runs for a candidate that
+     * has not proved itself, and a stale spelling cannot make this module write anything.
+     */
+    private fun hookAnchoredSetter(
+        owner: String,
+        candidates: List<String>,
+        role: HostMethods.Role,
+        label: String,
+        readings: () -> List<Pair<String, Any?>>,
+        onEvidence: (String) -> Unit = {},
+        onEnabled: () -> Unit
+    ) {
+        val ownerClass = loadClassOrNull(owner)
+        if (ownerClass == null) {
+            Log.i("Failed: Enforce $label exclusivity - cannot resolve $owner")
+            return
+        }
+        candidates.forEach { candidateName ->
+            runCatching {
+                val setter = ownerClass.declaredMethods.firstOrNull { candidate ->
+                    candidate.name == candidateName &&
+                        candidate.parameterTypes.sameAs(PRIMITIVE_BOOLEAN) &&
+                        candidate.returnType == PRIMITIVE_VOID
+                }?.apply { isAccessible = true }
+                    ?: throw NoSuchMethodException("$owner#$candidateName(Z)")
+
+                val before = ThreadLocal<List<Pair<String, Any?>>>()
+                setter.hookBefore { before.set(runCatching(readings).getOrDefault(emptyList())) }
+                setter.hookAfter { param ->
+                    val was = before.get().orEmpty()
+                    before.remove()
+                    val now = runCatching(readings).getOrDefault(emptyList())
+                    val moved = now.firstOrNull { (key, value) ->
+                        was.any { it.first == key && it.second != value }
+                    }
+                    if (moved != null) {
+                        // The preference followed the argument, so this spelling really does own the
+                        // key - and for the split pair, the getter that moved is the gate.
+                        HostMethods.resolve(role, candidateName, owner, "'${moved.first}' moved")
+                        onEvidence(moved.first)
+                    }
+
+                    val enabled = param.args?.firstOrNull() == true
+                    val trace = "$label=$enabled caller=${callerHint()}"
+                    if (trace != lastSetterTrace) {
+                        lastSetterTrace = trace
+                        if (setterReportCount.incrementAndGet() <= SETTER_REPORT_LIMIT) {
+                            Log.i("Setter: $trace")
+                        }
+                    }
+
+                    if (!enabled) return@hookAfter
+                    if (!HostMethods.isResolved(role, candidateName)) return@hookAfter
+                    onEnabled()
+                    if (exclusionReportCount.incrementAndGet() <= EXCLUSION_REPORT_LIMIT) {
+                        Log.i("Exclusion: $label enabled -> the other mode was cleared")
+                    }
+                }
+                Log.i("Success: Watch $label setter candidate $owner.$candidateName()")
+            }.onFailure { error ->
+                Log.i("Failed: Watch $label setter candidate $owner.$candidateName()")
+                Log.i(error)
+            }
+        }
+    }
+
+    /**
+     * Clears the *other* mode after the user switched one on, but only once the other mode's setter
+     * has proved itself.
+     *
+     * Skipping is the right failure. The two preferences are independent, so leaving both on gives a
+     * keyboard that is neither - whereas calling a stale spelling would set whatever preference that
+     * name now owns, and nothing in the UI would connect the two. The line below is what keeps the
+     * skipped case visible in a report instead of looking like a hook that never fired.
+     */
+    private fun clearOtherMode(owner: String, role: HostMethods.Role, label: String) {
+        val setter = HostMethods.name(role)
+        if (setter == null) {
+            if (exclusionReportCount.incrementAndGet() <= EXCLUSION_REPORT_LIMIT) {
+                Log.i("Exclusion: $label setter still unidentified - left untouched")
+            }
+            return
+        }
+        callOnSingleton(owner, "a", setter, false)
     }
 
     /** Reads one `int` field, walking up to whichever superclass declares it. */
@@ -1762,28 +1960,38 @@ internal object WeTypeLayoutHooks {
      * `i1.M3()`. Logging both entries shows whether the rewritten arguments actually arrive.
      */
     private fun hookPaddingRecords() {
-        listOf(M1 to "B2", SETTINGS to "M3").forEach { (className, methodName) ->
+        // Matched by name first, then by "the only five-int writer this class has".
+        //
+        // 3.5.4 renamed this one: `i1.M3(IIIII)` is now `j1.P3(IIIII)` - the sole `(IIIII)V` method
+        // on that class - and `M3` itself was repurposed as a logging helper that takes a tag
+        // string. Binding by name alone would drop the probe without saying so, which is the one
+        // outcome a diagnostic must never produce, so the bound name is logged either way.
+        listOf(M1 to listOf("B2"), SETTINGS to listOf("M3", "P3"))
+            .forEach { (className, methodNames) ->
             runCatching {
                 val owner = loadClassOrNull(className) ?: error("Failed to resolve $className")
-                val record = owner.declaredMethods.firstOrNull { candidate ->
-                    candidate.name == methodName &&
-                        candidate.parameterTypes.size == ADJUST_ARG_COUNT &&
+                val writers = owner.declaredMethods.filter { candidate ->
+                    candidate.parameterTypes.size == ADJUST_ARG_COUNT &&
                         candidate.parameterTypes.all { it == PRIMITIVE_INT } &&
                         candidate.returnType == PRIMITIVE_VOID
-                }?.apply { isAccessible = true }
-                    ?: error("No $methodName(IIIII) on $className")
+                }
+                val record = (writers.firstOrNull { it.name in methodNames }
+                    ?: writers.singleOrNull())
+                    ?.apply { isAccessible = true }
+                    ?: error("No ${methodNames.first()}(IIIII) on $className")
+                val bound = record.name
 
                 record.hookBefore { param ->
                     if (recordProbeCount.incrementAndGet() <= RECORD_PROBE_LIMIT) {
                         Log.i(
-                            "Padding record: ${className.substringAfterLast('.')}.$methodName(" +
+                            "Padding record: ${className.substringAfterLast('.')}.$bound(" +
                                 param.args.joinToString(",") + ") <- ${callerHint()}"
                         )
                     }
                 }
-                Log.i("Success: Probe padding record via $className.$methodName()")
+                Log.i("Success: Probe padding record via $className.$bound()")
             }.onFailure { error ->
-                Log.i("Failed: Probe padding record via $className.$methodName()")
+                Log.i("Failed: Probe padding record via $className.${methodNames.first()}()")
                 Log.i(error)
             }
         }
@@ -2587,6 +2795,31 @@ internal object WeTypeLayoutHooks {
         }?.apply { isAccessible = true }?.invoke(instance, null, 1, null)
     }.getOrNull()
 
+    /**
+     * Installs the fold-gate bypass on **every** candidate spelling of a gate, then lets the
+     * preference key decide which candidate was the real one.
+     *
+     * ### Why a candidate list is the whole design (3.5.4, 2026-09-23)
+     *
+     * This used to hook `k2()` and `Y2()` because that is what 3.5.3 called the gates. 3.5.4 renamed
+     * the pair to `l2()` / `a3()` and handed both old names to unrelated members - `k2()` is now the
+     * SMS-code autofill preference, `Y2()` a list-emptiness test. Both spellings still exist with the
+     * right signature, so the install reported `Success` on 24 of 24 hooks while the gate this
+     * module exists for was not hooked at all. A device report shows it once read against the key:
+     * `j1.k2() = true | … userOn=false` - the gate saying "on" while the user's own preference said
+     * "off".
+     *
+     * No name can be trusted, and no *shape* separates the gates either: `settings` declares 118
+     * no-arg booleans in 3.5.4, one per preference, and the gates sit among them. What does separate
+     * them is the anchor - a gate reads its own preference key, and a key is a string literal that no
+     * obfuscator rewrites. So every candidate gets a window, and whichever one reads
+     * [SINGLE_HAND_SETTING] from inside its own window becomes
+     * [HostMethods.Role.SINGLE_HAND_GATE].
+     *
+     * A window on a candidate that turns out to be something else costs a `ThreadLocal` pair per
+     * call and changes nothing: `X1()` is consulted only by gates, and no non-gate candidate reaches
+     * it.
+     */
     private fun hookSingleHandModeGate() {
         hookFoldGate()
 
@@ -2596,7 +2829,7 @@ internal object WeTypeLayoutHooks {
             return
         }
 
-        listOf("k2", "Y2").forEach { methodName ->
+        HostMethods.SINGLE_HAND_GATES.forEach { methodName ->
             runCatching {
                 val gateMethod = settingsClass.declaredMethods.firstOrNull { method ->
                     method.name == methodName &&
@@ -2605,10 +2838,12 @@ internal object WeTypeLayoutHooks {
                 }?.apply { isAccessible = true }
                     ?: throw NoSuchMethodException("$SETTINGS#$methodName()")
 
-                // Open the window right before the host evaluates the gate, and close it after,
-                // so only this evaluation sees the bypassed fold gate.
+                // Open the window right before the host evaluates the gate, and close it after, so
+                // only this evaluation sees the bypassed fold gate.
                 gateMethod.hookBefore {
                     if (HookSettings.unlockSingleHandMode) foldGateBypass.set(true)
+                    gateWindowOwner.set(methodName)
+                    gateWindowDepth.set(gateDepth() + 1)
                 }
                 gateMethod.hookAfter { param ->
                     // Read the window *before* closing it. Clearing first is what this did until
@@ -2617,17 +2852,30 @@ internal object WeTypeLayoutHooks {
                     // `Settings applied … unlockSingleHandMode=true`, and all four ended
                     // `bypass=false`. The field exists precisely to say whether the fold gate was
                     // bypassed during *this* evaluation, so it cannot be sampled after the reset.
-                    val bypassed = foldGateBypass.get()
-                    foldGateBypass.set(false)
-                    // Deliberately *not* forcing the result. `k2()` has four conditions and the
+                    val bypassed = foldGateBypass.get() == true
+                    // ⚠️ The close has to happen *before* the trace, not just before the return.
+                    // The trace reads the anchor key through the very reader that
+                    // [hookGateAnchorProbe] watches, and that probe adopts whoever
+                    // [gateWindowOwner] names - so a trace taken inside the window would make every
+                    // candidate look like the gate, including the ones that are not. Closing first
+                    // is what keeps the anchor evidence honest.
+                    val depth = gateDepth() - 1
+                    if (depth <= 0) {
+                        gateWindowDepth.remove()
+                        gateWindowOwner.remove()
+                        foldGateBypass.set(false)
+                    } else {
+                        gateWindowDepth.set(depth)
+                    }
+                    // Deliberately *not* forcing the result. The gate has four conditions and the
                     // last one is the user's own `ime_enable_single_hand_mode`; overriding it would
                     // make the in-keyboard toggle one-way (it could turn the mode on but never
                     // off). Bypassing the fold gate is enough - the user's setting decides the rest.
                     // One line per *distinct* state, not per call: the gate is evaluated on every
-                    // keyboard layout pass, and the first six calls all land during start-up, when
-                    // the user's own setting has not been read yet. Keying on the trace is what
-                    // keeps the interesting transition (the setting turning on) inside the budget.
-                    val trace = singleHandTrace(bypassed)
+                    // keyboard layout pass, and the first calls all land during start-up, when the
+                    // user's own setting has not been read yet. Keying on the trace is what keeps
+                    // the interesting transition (the setting turning on) inside the budget.
+                    val trace = singleHandTrace(bypassed, methodName)
                     val seen = "$methodName=${param.result} $trace"
                     if (seen != lastGateTrace) {
                         lastGateTrace = seen
@@ -2636,32 +2884,114 @@ internal object WeTypeLayoutHooks {
                         }
                     }
                 }
-                Log.i("Success: Unlock WeType single-hand mode via $SETTINGS.$methodName()")
+                Log.i("Success: Watch single-hand gate candidate $SETTINGS.$methodName()")
             }.onFailure { error ->
-                Log.i("Failed: Unlock WeType single-hand mode via $SETTINGS.$methodName()")
+                Log.i("Failed: Watch single-hand gate candidate $SETTINGS.$methodName()")
                 Log.i(error)
             }
+        }
+
+        hookGateAnchorProbe(settingsClass)
+    }
+
+    /**
+     * Watches `settings`' generic preference reader and adopts the gate candidate that reads the
+     * single-hand key from inside its own window.
+     *
+     * The confirmation half of [hookSingleHandModeGate]: the window says *where* the read happened,
+     * the key says *which* preference it asked for, and only a `settings` method that asked for
+     * `ime_enable_single_hand_mode` itself can satisfy both. Nothing is adopted without it, which is
+     * the difference between this and the name lookup that 3.5.4 defeated.
+     *
+     * The probe disarms once the role is resolved. Until then it runs on every preference read in
+     * the input method, so the body checks the window *first* - the common case is one `ThreadLocal`
+     * read and an immediate return, with no `String` comparison at all.
+     */
+    private fun hookGateAnchorProbe(settingsClass: Class<*>) {
+        val readerName = settingReader ?: return
+        val probe = settingsClass.declaredMethods.firstOrNull {
+            it.name == readerName &&
+                it.parameterTypes.size == 2 &&
+                it.returnType == PRIMITIVE_BOOLEAN
+        }?.apply { isAccessible = true } ?: return
+        runCatching {
+            probe.hookBefore { param ->
+                if (anchorProbeDisarmed.get()) return@hookBefore
+                // Already a bare method name - see [gateWindowOwner]. This used to be a qualified
+                // `"$SETTINGS#$methodName"` chopped down here, which is how the role came to hold
+                // `j1#l2` in 1.0.27 and silenced every caller of `singleHandActive()`.
+                val candidate = gateWindowOwner.get() ?: return@hookBefore
+                val key = param.args?.firstOrNull() as? String ?: return@hookBefore
+                if (key != SINGLE_HAND_SETTING) return@hookBefore
+                HostMethods.resolve(
+                    HostMethods.Role.SINGLE_HAND_GATE,
+                    candidate,
+                    SETTINGS,
+                    "read '$key' from inside its own window"
+                )
+                anchorProbeDisarmed.set(true)
+            }
+            Log.i("Success: Watch single-hand anchor through $SETTINGS.$readerName(String, boolean)")
+        }.onFailure { error ->
+            Log.i("Failed: Watch single-hand anchor through $SETTINGS.$readerName(String, boolean)")
+            Log.i(error)
         }
     }
 
     /**
-     * The three inputs of `i1.k2()` other than the fold gate, so a field report is conclusive:
-     * whether the keyboard is floating, which kind it is, whether that kind qualifies, and what
-     * the two qualifying kind ids are.
+     * The rest of the gate's conditions, so a field report names *which* one closed it.
      *
-     * [bypassed] is handed in rather than read here because the caller is the one that owns the
-     * window's lifetime - by the time a caller could ask, it has already closed it.
+     * The gate is `!float.f.V() && !N.<eligible>(N.<kindOf>()) && !X1() && <the user's preference>`,
+     * read off the bytecode rather than guessed. Each of the first three compiles to `if-nez v0, :out`
+     * against a zero-initialised return slot, so all three are **negated** - `floating=false`,
+     * `fold=false` and `kindOk=false` are the *satisfied* readings - while only the preference is a
+     * positive `if-eqz`. (An earlier revision of the knowledge base had the first three the other way
+     * round; the bytecode and a device log settling it are both in REV-06.)
+     *
+     * [bypassed] is handed in rather than read here because the caller owns the window's lifetime
+     * and has already closed it. [foldGate] is sampled *after* that close on purpose, so it reports
+     * the host's own verdict instead of the module's bypass.
      */
-    private fun singleHandTrace(bypassed: Boolean): String = runCatching {
-        val kind = callOnSingleton(KEYBOARD_MODEL, "a", "t0")
-        val typeOk = if (kind == null) null else callOnSingleton(KEYBOARD_MODEL, "a", "O1", kind)
-        // The fourth condition and the bypass flag, so a report names *which* condition closed
-        // the gate instead of only that it was closed.
-        val userOn = callOnSingleton(SETTINGS, "a", SINGLE_HAND_SETTING_READ, SINGLE_HAND_SETTING, false)
-        "floating=${callOnSingleton(FLOAT_SINGLETON, "a", "V")} kind=$kind typeOk=$typeOk" +
+    private fun singleHandTrace(bypassed: Boolean, methodName: String): String = runCatching {
+        val resolved = HostMethods.name(HostMethods.Role.SINGLE_HAND_GATE)
+        "floating=${callOnSingleton(FLOAT_SINGLETON, "a", "V")}" +
+            " fold=${callM1("X1")}" +
+            " kind=${kindProbe(HostMethods.SINGLE_HAND_KINDS)}" +
+            " userOn=${readHostPreference(SINGLE_HAND_SETTING)}" +
             " sceneE=${keyboardSceneId("e")} sceneJ=${keyboardSceneId("j")}" +
-            " userOn=$userOn bypass=$bypassed"
+            " bypass=$bypassed resolved=$resolved current=${resolved == methodName}"
     }.getOrElse { "trace failed: $it" }
+
+    /**
+     * `model.N`'s "current keyboard kind" and "is that kind eligible" pair, for the trace only.
+     *
+     * 3.5.4 moved this pair too - the single-hand gate went from `t0()`/`O1(I)` to `u0()`/`P1(I)`,
+     * and `t0()` now hands back a `StateFlow`. A trace collected on 3.5.4 therefore printed
+     * `kind=kotlinx.coroutines.flow.m@…` where an `Int` belongs, which is how the drift was spotted.
+     * Whichever spelling resolves is named in the line, so every value carries its provenance.
+     */
+    private fun kindProbe(kindNames: List<String>): String = runCatching {
+        val model = loadClassOrNull(KEYBOARD_MODEL) ?: return@runCatching "n/a"
+        val instance = model.getDeclaredField("a").apply { isAccessible = true }.get(null)
+            ?: return@runCatching "n/a"
+        kindNames.forEach { name ->
+            val kindOf = model.declaredMethods.firstOrNull {
+                it.name == name && it.parameterTypes.isEmpty() && it.returnType == PRIMITIVE_INT
+            } ?: return@forEach
+            kindOf.isAccessible = true
+            val kind = kindOf.invoke(instance)
+            val eligible = HostMethods.KIND_CHECKS.firstNotNullOfOrNull { checkName ->
+                model.declaredMethods.firstOrNull {
+                    it.name == checkName &&
+                        it.parameterTypes.size == 1 &&
+                        it.parameterTypes[0] == PRIMITIVE_INT &&
+                        it.returnType == PRIMITIVE_BOOLEAN
+                }?.apply { isAccessible = true }?.let { check -> "$checkName=${check.invoke(instance, kind)}" }
+            }
+            return@runCatching "$name=$kind/$eligible"
+        }
+        "none of $kindNames"
+    }.getOrElse { "failed" }
 
     private fun keyboardSceneId(field: String): Any? = runCatching {
         val cls = loadClassOrNull(KEYBOARD_SCENE_CLASS) ?: return@runCatching null
@@ -2707,15 +3037,20 @@ internal object WeTypeLayoutHooks {
 
             // Scope semantics - deliberately *not* consume-once.
             //
-            // `k2()` evaluates this as the *third* of four conditions, and the two ahead of it
-            // (`float.f.V()` and `N.t0()/O1()`) can reach this same method on their own. A
+            // Each gate evaluates this as the *third* of four conditions, and the two ahead of it
+            // (`float.f.V()` and the keyboard-kind pair) can reach this same method on their own. A
             // consume-once flag is therefore spent before the condition that needs it runs: the
-            // real `true` survives, `!X1()` collapses to false, and `k2()` stays false no matter
-            // what the user's own switch says. The window is opened by the `k2()` / `Y2()`
-            // before-hook and closed by that same hook's after-hook, so this body must leave the
-            // flag alone and only answer the question it was asked.
+            // real verdict survives, `!X1()` collapses to false, and the gate stays false no matter
+            // what the user's own switch says. The window is opened by the candidate gates returned
+            // by `HostMethods.SINGLE_HAND_GATES` and closed by those same hooks' after-callbacks, so
+            // this body must leave the flag alone and only answer the question it was asked.
+            //
+            // ⚠️ `X1()` is **true on the unfolded inner screen and false on the folded outer one**
+            // (measured 2026-09-23: `X1()=true` at `app=2364x1672`, `X1()=false` at `app=1168x1712`),
+            // and every gate negates it. So forcing `false` here is what *unlocks* one-handed mode on
+            // the large screen, which is the whole point of the switch - not an inversion of it.
             foldGateMethod.hookBefore { param ->
-                if (foldGateBypass.get()) param.result = false
+                if (foldGateBypass.get() == true) param.result = false
             }
             Log.i("Success: Bypass WeType unfolded-screen gate via $M1.X1()")
         }.onFailure { error ->
