@@ -121,8 +121,22 @@ internal object HostNames {
             // Both width-chain entry points: the scale factor and the unfolded-screen gate.
             "widthUtil" -> declares("g1", 0, Double::class.javaPrimitiveType) &&
                 declares("X1", 0, Boolean::class.javaPrimitiveType)
-            // Both halves of the single-hand gate.
-            "settings" -> declares("k2", 0, Boolean::class.javaPrimitiveType) &&
+            // Both halves of the single-hand gate - **and the preference reader**.
+            //
+            // The reader is the part that carries weight. It is what every anchor in [HostMethods]
+            // reads a preference key through, so "the class that declares it" is a property of the
+            // code rather than of the obfuscator's current mood - and it happens to separate the two
+            // builds cleanly: 3.5.3's `i1` has it with 393 members, 3.5.4's `j1` with 400, against 3
+            // and 2 members for the empty classes that moved into the other spelling.
+            //
+            // ⚠️ The `k2`/`Y2` names are the module's *own* gate candidates and are only a second
+            // fingerprint. They are not evidence of anything on their own: 3.5.4 kept both alive on
+            // unrelated members (`k2()` reads `ime_enable_sms_verification_code_auto`, `Y2()` tests
+            // a list for emptiness), so they pass here for a different reason on each build. Take
+            // them out before trusting them for a build neither of these two is.
+            "settings" -> HostMethods.SETTING_READERS.any {
+                declares(it, 2, Boolean::class.javaPrimitiveType)
+            } && declares("k2", 0, Boolean::class.javaPrimitiveType) &&
                 declares("Y2", 0, Boolean::class.javaPrimitiveType)
             "paddingGate" -> declares("P1", 0, Boolean::class.javaPrimitiveType) &&
                 declares("V3", 1, Void.TYPE)

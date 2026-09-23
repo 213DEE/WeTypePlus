@@ -2816,9 +2816,19 @@ internal object WeTypeLayoutHooks {
      * [SINGLE_HAND_SETTING] from inside its own window becomes
      * [HostMethods.Role.SINGLE_HAND_GATE].
      *
-     * A window on a candidate that turns out to be something else costs a `ThreadLocal` pair per
-     * call and changes nothing: `X1()` is consulted only by gates, and no non-gate candidate reaches
-     * it.
+     * Every spelling in the list gets a window, and a spelling this build does not declare says so
+     * and is skipped - deliberately *not* reported as a failed hook, because a candidate list is
+     * wider than any single build and `Bridge` builds its "N installed / M failed" line off these
+     * very log prefixes. Counting a spelling that this build never had would put a false failure in
+     * the user-facing report.
+     *
+     * A window on a spelling that turns out not to consult `X1()` is inert rather than harmless -
+     * `foldGateBypass` is only ever *read* by the `X1()` hook, so a method whose body never reaches
+     * `X1()` never consumes it. That is precisely why this list holds every gate spelling instead of
+     * only the one the probe resolves: the **menu** gate (`a3()` / `Y2()`) is the one that decides
+     * whether the one-hand switch is usable in the settings menu, and it never reads the anchor key,
+     * so the probe can never resolve it. A list holding only the layout gate installs clean, resolves
+     * clean and leaves the switch greyed out.
      */
     private fun hookSingleHandModeGate() {
         hookFoldGate()
@@ -2830,14 +2840,16 @@ internal object WeTypeLayoutHooks {
         }
 
         HostMethods.SINGLE_HAND_GATES.forEach { methodName ->
+            val gateMethod = settingsClass.declaredMethods.firstOrNull { method ->
+                method.name == methodName &&
+                    method.parameterTypes.isEmpty() &&
+                    method.returnType == PRIMITIVE_BOOLEAN
+            }?.apply { isAccessible = true }
+            if (gateMethod == null) {
+                Log.i("Skip: $SETTINGS.$methodName() is not in this host build")
+                return@forEach
+            }
             runCatching {
-                val gateMethod = settingsClass.declaredMethods.firstOrNull { method ->
-                    method.name == methodName &&
-                        method.parameterTypes.isEmpty() &&
-                        method.returnType == PRIMITIVE_BOOLEAN
-                }?.apply { isAccessible = true }
-                    ?: throw NoSuchMethodException("$SETTINGS#$methodName()")
-
                 // Open the window right before the host evaluates the gate, and close it after, so
                 // only this evaluation sees the bypassed fold gate.
                 gateMethod.hookBefore {
@@ -2956,41 +2968,38 @@ internal object WeTypeLayoutHooks {
         val resolved = HostMethods.name(HostMethods.Role.SINGLE_HAND_GATE)
         "floating=${callOnSingleton(FLOAT_SINGLETON, "a", "V")}" +
             " fold=${callM1("X1")}" +
-            " kind=${kindProbe(HostMethods.SINGLE_HAND_KINDS)}" +
+            " kind=${kindProbe()}" +
             " userOn=${readHostPreference(SINGLE_HAND_SETTING)}" +
             " sceneE=${keyboardSceneId("e")} sceneJ=${keyboardSceneId("j")}" +
             " bypass=$bypassed resolved=$resolved current=${resolved == methodName}"
     }.getOrElse { "trace failed: $it" }
 
     /**
-     * `model.N`'s "current keyboard kind" and "is that kind eligible" pair, for the trace only.
+     * `model.N`'s "current keyboard kind", reported together with the check it belongs to.
      *
-     * 3.5.4 moved this pair too - the single-hand gate went from `t0()`/`O1(I)` to `u0()`/`P1(I)`,
-     * and `t0()` now hands back a `StateFlow`. A trace collected on 3.5.4 therefore printed
-     * `kind=kotlinx.coroutines.flow.m@…` where an `Int` belongs, which is how the drift was spotted.
-     * Whichever spelling resolves is named in the line, so every value carries its provenance.
+     * The check half is resolved first and the getter half is taken from
+     * [HostMethods.SINGLE_HAND_KIND_FOR] keyed on it, because the getter half cannot be resolved on
+     * its own: 3.5.3's `model.N` declares both `t0()` and `u0()` as no-arg `Int` getters, so "newest
+     * spelling that exists" answers `u0()` on a build whose gate reads `t0()` - a wrong number that
+     * reads exactly like a right one, which is how this field first went wrong. The method name is
+     * printed next to the value, so the line never shows a reading without its provenance.
      */
-    private fun kindProbe(kindNames: List<String>): String = runCatching {
+    private fun kindProbe(): String = runCatching {
         val model = loadClassOrNull(KEYBOARD_MODEL) ?: return@runCatching "n/a"
         val instance = model.getDeclaredField("a").apply { isAccessible = true }.get(null)
             ?: return@runCatching "n/a"
-        kindNames.forEach { name ->
-            val kindOf = model.declaredMethods.firstOrNull {
-                it.name == name && it.parameterTypes.isEmpty() && it.returnType == PRIMITIVE_INT
-            } ?: return@forEach
-            kindOf.isAccessible = true
-            val kind = kindOf.invoke(instance)
-            val eligible = HostMethods.KIND_CHECKS.firstNotNullOfOrNull { checkName ->
-                model.declaredMethods.firstOrNull {
-                    it.name == checkName &&
-                        it.parameterTypes.size == 1 &&
-                        it.parameterTypes[0] == PRIMITIVE_INT &&
-                        it.returnType == PRIMITIVE_BOOLEAN
-                }?.apply { isAccessible = true }?.let { check -> "$checkName=${check.invoke(instance, kind)}" }
-            }
-            return@runCatching "$name=$kind/$eligible"
-        }
-        "none of $kindNames"
+        fun member(name: String, params: Int, returns: Class<*>) = model.declaredMethods.firstOrNull {
+            it.name == name && it.parameterTypes.size == params && it.returnType == returns
+        }?.apply { isAccessible = true }
+
+        val check = HostMethods.KIND_CHECKS.firstNotNullOfOrNull { member(it, 1, PRIMITIVE_BOOLEAN) }
+            ?: return@runCatching "no check (${HostMethods.KIND_CHECKS.joinToString()})"
+        val kindName = HostMethods.SINGLE_HAND_KIND_FOR[check.name]
+            ?: return@runCatching "${check.name}/? (kind pairing unknown)"
+        val kindOf = member(kindName, 0, PRIMITIVE_INT)
+            ?: return@runCatching "${check.name}/$kindName missing"
+        val kind = kindOf.invoke(instance)
+        "$kindName=$kind/${check.name}=${check.invoke(instance, kind)}"
     }.getOrElse { "failed" }
 
     private fun keyboardSceneId(field: String): Any? = runCatching {

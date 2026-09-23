@@ -13,10 +13,11 @@ import java.util.concurrent.ConcurrentHashMap
  * hooks. It does not fix the method half, and 3.5.4 moved those too - while keeping the old
  * spelling alive on an unrelated member:
  *
- * | role | 3.5.3 | 3.5.4 | what the 3.5.4 spelling actually does now |
+ * | role | 3.5.3 | 3.5.4 | what the 3.5.3 spelling does on 3.5.4 |
  * |---|---|---|---|
- * | single-hand gate | `i1.k2()` | `j1.l2()` | `k2()` reads `ime_enable_sms_verification_code_auto` |
- * | single-hand setter | `i1.a5(Z)` | `j1.d5(Z)` | `a5(Z)` writes `ime_show_voice_speed` |
+ * | single-hand layout gate | `i1.k2()` | `j1.l2()` | `k2()` reads `ime_enable_sms_verification_code_auto` |
+ * | single-hand **menu** gate | `i1.Y2()` | `j1.a3()` | `Y2()` is a list-emptiness test (`L0()`, `isEmpty()`, `s1()`) |
+ * | single-hand setter | `i1.a5(Z)` | `j1.d5(Z)` | `a5(Z)` writes `ime_plus_detail_quick_send` |
  * | split-keyboard gate | `Z0.P1()` | `a1.Q1()` | `P1()` reads `ime_show_voice_speed` |
  * | split-keyboard setter | `Z0.V3(Z)` | `a1.X3(Z)` | `V3(Z)` writes `ime_show_voice_speed` |
  *
@@ -81,8 +82,34 @@ internal object HostMethods {
 
     // ------------------------------------------------------------------ candidates
 
-    /** `settings`' single-hand gate, `()Z`. Newest host build first. */
-    val SINGLE_HAND_GATES = listOf("l2", "k2")
+    /**
+     * `settings`' single-hand gates, `()Z`. Newest host build first, and **all spellings, not just
+     * the current one** - this list is what the fold-gate bypass is installed on.
+     *
+     * There are two of them per build, and they are not interchangeable:
+     *
+     * - `l2` / `k2` - the **layout** gate. `!float.f.V() && !N.check(N.singleHandKind()) &&
+     *   !m1.X1() && <the user's own preference>`, and it is read from `model.Q` (the padding model),
+     *   `adjust.b`, `settings.b` and the toolbar. This is the one that decides how the keyboard is
+     *   laid out, and the only one that reads `ime_enable_single_hand_mode`.
+     * - `a3` / `Y2` - the **menu** gate. Same first three conditions, but keyed on the *split*
+     *   keyboard kind and finishing on a width test (`m1.z(...) >= b7.e.b(context, 320)`). Its only
+     *   caller is `settings.a.e()`, for `R.string.s10_item_single_hand` - "is the one-hand item
+     *   usable in the settings menu".
+     *
+     * ⚠️ **Dropping the menu gate is silent on every report the module produces.** Only the layout
+     * gate reads the anchor key, so only the layout gate is ever *resolved* by the probe; a list
+     * holding just that one still installs clean, still resolves, still logs a correct-looking
+     * `Single-hand gate:` line - and leaves the switch greyed out in the menu, which is the one
+     * thing a user notices. 1.0.27 shipped exactly that: the list was cut from `["k2","Y2"]` to
+     * `["l2","k2"]`, which on 3.5.3 kept the layout gate and dropped the menu gate, and on 3.5.4
+     * never had the menu gate at all (that build's `a3` was not in any list).
+     *
+     * So the rule for this list is not "which candidate is the gate" - the probe answers that -
+     * but "which methods must see `X1()` as false". A candidate that turns out not to consult `X1()`
+     * makes its window inert and costs nothing.
+     */
+    val SINGLE_HAND_GATES = listOf("l2", "a3", "k2", "Y2")
 
     /** `settings`' single-hand setter, `(Z)V`. */
     val SINGLE_HAND_SETTERS = listOf("d5", "a5")
@@ -103,23 +130,31 @@ internal object HostMethods {
     val SETTING_READERS = listOf("B")
 
     /**
-     * `model.N`'s "which keyboard kind is current" getter, `()I`, single-hand flavour.
+     * `model.N`'s "is that kind eligible" check, `(I) -> boolean` - `P1` from 3.5.4, `O1` up to
+     * 3.5.3. Both gates negate this one, so `false` is the reading that lets a gate through.
      *
-     * Only used to make a [WeTypeLayoutHooks] gate trace read as evidence rather than as numbers:
-     * the host's gate asks `kindOf()` then `isEligible(kind)`, and that pair moved in 3.5.4 too
-     * (`t0`/`O1` -> `u0`/`P1`, with the old `t0` now returning a `StateFlow`), which is why a trace
-     * collected on 3.5.4 printed `kind=kotlinx.coroutines.flow.m@…` against an `Int` field.
-     */
-    val SINGLE_HAND_KINDS = listOf("u0", "t0")
-
-    /** Same, split-keyboard flavour. */
-    val SPLIT_KINDS = listOf("n0", "m0")
-
-    /**
-     * `model.N`'s "is that kind eligible" check, `(I) -> boolean` - `O1` up to 3.5.3, `P1` from
-     * 3.5.4. The gate negates this one, so `false` is the reading that lets a gate through.
+     * This half identifies a build on its own: 3.5.3's `model.N` declares `O1(I)` and no `P1(I)`,
+     * and 3.5.4 declares both. Newest spelling first is therefore enough here.
      */
     val KIND_CHECKS = listOf("P1", "O1")
+
+    /**
+     * Which `model.N` kind getter belongs to each check spelling, for the single-hand gate.
+     *
+     * The getter half **cannot** be resolved by "the newest spelling that exists" the way the check
+     * can: 3.5.3's `model.N` declares both `t0()` and `u0()` among its 13 no-arg `Int` getters, so a
+     * newest-first walk answers `u0()` on a build whose gate actually reads `t0()`. That is a wrong
+     * number that looks exactly like a right one - the failure mode this whole file exists to avoid
+     * - and it is how the 3.5.4 trace came to print `kind=kotlinx.coroutines.flow.m@…` where an
+     * `Int` belongs, `t0()` having by then become a `StateFlow` getter.
+     *
+     * Keyed on the check instead, the pair is unambiguous on both builds, and a future build that
+     * moves a getter alone reports `?` rather than a plausible reading from the wrong method.
+     *
+     * (The same pairing for the *split* kind, which only the menu gate consults: `P1` -> `n0`,
+     * `O1` -> `m0`.)
+     */
+    val SINGLE_HAND_KIND_FOR = mapOf("P1" to "u0", "O1" to "t0")
 
     // ------------------------------------------------------------------ resolved state
 
