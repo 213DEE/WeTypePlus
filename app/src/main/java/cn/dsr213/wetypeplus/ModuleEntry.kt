@@ -3,6 +3,7 @@ package cn.dsr213.wetypeplus
 import cn.dsr213.wetypeplus.bridge.Bridge
 import cn.dsr213.wetypeplus.bridge.Log
 import cn.dsr213.wetypeplus.bridge.currentApplication
+import cn.dsr213.wetypeplus.hook.ClassLoaderGuard
 import cn.dsr213.wetypeplus.hook.HookSettings
 import cn.dsr213.wetypeplus.hook.WeTypeLayoutHooks
 import io.github.libxposed.api.XposedModule
@@ -79,6 +80,12 @@ class ModuleEntry : XposedModule() {
             return
         }
         layoutHooksInstalled = true
+        // ⚠️ This loader is very often **not** the one the keyboard ends up running on. WeType
+        // hot-patches itself with RFix/Tinker, and Tinker replaces the process's loader from inside
+        // `Application#attachBaseContext` — which runs after this callback. The hooks installed
+        // below therefore land on classes the host will never call, and it shows up as a report that
+        // is green in every field while the keyboard ignores all of it. [ClassLoaderGuard] is what
+        // catches that and reinstalls; see it for the evidence.
         Bridge.updateClassLoader(param.classLoader)
         Log.i("Host class loader: ${Bridge.classLoaderDescription()}")
         installLayoutHooks()
@@ -86,8 +93,8 @@ class ModuleEntry : XposedModule() {
 
     override fun onHotReloading(param: HotReloadingParam): Boolean {
         Bridge.prepareForHotReload()
-        WeTypeLayoutHooks.prepareForHotReload()
-        HookSettings.prepareForHotReload()
+        WeTypeLayoutHooks.resetGenerationState()
+        HookSettings.resetGenerationState()
         layoutHooksInstalled = false
         Log.i("Old generation is ready for hot reload")
         return true
@@ -158,6 +165,12 @@ class ModuleEntry : XposedModule() {
         // dropped on the floor. It is idempotent, and it costs nothing when there is no `Context`
         // yet - the read path starts it again later.
         HookSettings.startForProcess()
+        // Installed here rather than at the entry point because this is the one function every
+        // install path reaches - cold start, hot reload, and the reinstall below - and the guard is
+        // idempotent, so arriving three times installs one watch. It goes in *before* the functional
+        // hooks: if a future framework hands `onPackageReady` over late enough that the host swaps
+        // its loader during this call, the watch is already up to catch it.
+        ClassLoaderGuard.watch { loader, source -> reinstallLayoutHooks(loader, source) }
         runCatching { WeTypeLayoutHooks.install() }
             .onFailure { error ->
                 Log.e("Failed to install keyboard layout hooks")
@@ -167,6 +180,45 @@ class ModuleEntry : XposedModule() {
         // changed" becomes a screen the user can read instead of a guess. Runs on its own thread:
         // this call site is the host's main thread during package start-up.
         Bridge.publishStatusAsync("hooks installed")
+    }
+
+    /**
+     * Reinstalls everything against a host class loader that has just replaced the one this module
+     * was handed.
+     *
+     * Reached from [ClassLoaderGuard] and nowhere else. The guard has already established that the
+     * loader is a different object, so nothing here re-checks that; what this function owns is the
+     * order of operations, and the order is the whole fix:
+     *
+     * 1. [Bridge.adoptClassLoader] swaps the loader the hooks resolve against **and** unhooks the
+     *    dead installation. Unhooking is not tidiness: those handles pin the replaced class loader,
+     *    so leaving them would keep the entire pre-patch dex mapped for the life of the process.
+     * 2. The hook-side caches are dropped, because they hold `Method` objects taken from classes in
+     *    the loader that is no longer in use (see [WeTypeLayoutHooks.resetGenerationState]).
+     * 3. The hooks are installed again — this time against the classes the keyboard actually runs.
+     *
+     * `layoutHooksInstalled` is deliberately left alone. It guards *start-up* (a repeated
+     * `onPackageReady` for `:hld`), not installation in general, and flipping it here would let a
+     * late `onPackageReady` install a second, redundant set.
+     */
+    private fun reinstallLayoutHooks(loader: ClassLoader, source: String) {
+        if (!Bridge.adoptClassLoader(loader)) {
+            // Two watchers can notice the same swap - the lifecycle hooks and the probe thread - and
+            // whoever loses that race has to do nothing rather than install a second set of hooks.
+            Log.i("Host class loader already adopted at $source; nothing to reinstall")
+            return
+        }
+        WeTypeLayoutHooks.resetGenerationState()
+        // Re-armed exactly as the install path does it, and for the same two reasons: if the receiver
+        // could not be registered at install time (no `Application` yet) this is the retry, and a
+        // settings push that lands while the hooks are going in would otherwise be dropped.
+        HookSettings.startForProcess()
+        runCatching { WeTypeLayoutHooks.install() }
+            .onFailure { error ->
+                Log.e("Failed to reinstall keyboard layout hooks")
+                Log.e(error)
+            }
+        Bridge.publishStatusAsync("reinstalled for host class loader swap")
     }
 
     private companion object {

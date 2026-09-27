@@ -717,8 +717,21 @@ internal object WeTypeLayoutHooks {
         hookKeyboardResetView()
     }
 
-    /** Drops generation-local state so a hot reload starts from a clean slate. */
-    fun prepareForHotReload() {
+    /**
+     * Drops every resolution and counter that belongs to one installation, so the next one starts
+     * from a clean slate.
+     *
+     * Two callers, one reason: both hand this module a set of host classes it has never seen before.
+     * A hot reload loads the module's own next generation; [ClassLoaderGuard] catches the host
+     * replacing *its* loader with an RFix/Tinker patch. The second is the one that made this
+     * function a hard requirement rather than a nicety — see [ClassLoaderGuard] for the full story.
+     *
+     * What makes it necessary in both cases is [HostMethods]: anchor resolutions hold `Method`
+     * objects, and a `Method` is only ever valid for the `Class` it was taken from. Carrying them
+     * across a loader change would leave every anchor naming a method that no longer exists in the
+     * loader the keyboard runs on.
+     */
+    fun resetGenerationState() {
         foldGateBypass.remove()
         cachedApplication = null
         widthReportCount.set(0)
@@ -730,10 +743,16 @@ internal object WeTypeLayoutHooks {
         anchorProbeDisarmed.set(false)
         gateWindowDepth.remove()
         gateWindowOwner.remove()
-        // Anchor resolutions are per generation: the method objects behind them were resolved
-        // against the class loader this instance was created with, and a hot reload brings a new
-        // one. Keeping the old answers would name methods that no longer exist in the new loader.
+        // Anchor resolutions are per installation: the method objects behind them were resolved
+        // against the class loader this instance was created with, and both a hot reload and a
+        // host-patch swap bring a new one. Keeping the old answers would name methods that no
+        // longer exist in the new loader.
         HostMethods.reset()
+        // Role names are cache *strings*, so a swap cannot invalidate them — but the signature check
+        // that produced them ran against the loader that is no longer in use. Re-running it against
+        // the live one is what keeps "a later patch renamed a class" from being a silent stale
+        // answer, and it makes a reinstall report the same `HostNames:` lines a cold start does.
+        HostNames.reset()
         resetViewReportCount.set(0)
         resetViewTreeCount.set(0)
         resetViewCopyCount.set(0)
@@ -770,7 +789,11 @@ internal object WeTypeLayoutHooks {
         floatMethod = null
         floatInstance = null
         floatResolved = false
-        HookSettings.prepareForHotReload()
+        // A per-installation *resolution*, like `floatResolved` above: the name it settled on was
+        // proven against the previous `settings` class, so a reinstall has to prove it again.
+        settingReaderResolved = false
+        settingReaderName = null
+        HookSettings.resetGenerationState()
     }
 
     // ------------------------------------------------------------- keyboard width source
@@ -1577,7 +1600,7 @@ internal object WeTypeLayoutHooks {
     private fun hookHandSplitExclusion() {
         // Touch the reader first so its own resolution line lands with the other install lines
         // rather than in the middle of the first user toggle.
-        settingReader
+        settingReader()
 
         hookAnchoredSetter(
             owner = SETTINGS,
@@ -1606,12 +1629,29 @@ internal object WeTypeLayoutHooks {
     }
 
     /**
+     * Set once [settingReader] has looked, whether or not it found anything.
+     *
+     * Two fields rather than a `by lazy`, because a `by lazy` would survive the loader swap this
+     * module now handles: it resolved `B(String, boolean)` against the *pre-patch* `settings`
+     * class, and on a reinstall it would hand back the same name without ever consulting the class
+     * the keyboard actually runs. Both fields are dropped by [resetGenerationState], which is what
+     * puts a reinstall on exactly the same footing as a cold start — same resolutions, same log
+     * lines, same report.
+     */
+    @Volatile
+    private var settingReaderResolved = false
+
+    @Volatile
+    private var settingReaderName: String? = null
+
+    /**
      * `settings`' generic `(String, boolean) -> boolean` preference reader - `i1.B` on 3.5.3,
      * `j1.B` on 3.5.4, the same name on both.
      *
      * Every per-preference getter on `settings` is a one-line wrapper around this method, which is
      * what makes a preference *key* observable from a hook at all, and therefore what every
-     * anchor in [HostMethods] rests on. Resolved once, by name, from the candidate list.
+     * anchor in [HostMethods] rests on. Resolved once per installation, by name, from the candidate
+     * list.
      *
      * [CORRECTION 2026-09-21, re-confirmed 2026-09-23] An earlier revision called `"C"`. There is no
      * `C(String, boolean)`: `C` exists only as the Kotlin default-argument bridge
@@ -1619,29 +1659,40 @@ internal object WeTypeLayoutHooks {
      * arguments threw, `userOn` came back `null` in every report, and the one condition that
      * decides whether the mode is on was the one condition never visible. The bridge is not a
      * fallback - it is the thing to avoid.
+     *
+     * The `Failed: ` answer is remembered as "resolved to nothing" rather than retried per call:
+     * this sits on a path that runs many times a second, so a host that never gains the method must
+     * not be able to make it log on every keyboard frame.
      */
-    private val settingReader: String? by lazy {
-        val owner = loadClassOrNull(SETTINGS)
-        val name = owner?.let { cls ->
-            HostMethods.SETTING_READERS.firstOrNull { candidate ->
-                cls.declaredMethods.any { method ->
-                    method.name == candidate &&
-                        method.parameterTypes.size == 2 &&
-                        method.returnType == PRIMITIVE_BOOLEAN
+    private fun settingReader(): String? {
+        settingReaderName?.let { return it }
+        if (settingReaderResolved) return null
+        synchronized(this) {
+            if (settingReaderResolved) return settingReaderName
+            val owner = loadClassOrNull(SETTINGS)
+            val name = owner?.let { cls ->
+                HostMethods.SETTING_READERS.firstOrNull { candidate ->
+                    cls.declaredMethods.any { method ->
+                        method.name == candidate &&
+                            method.parameterTypes.size == 2 &&
+                            method.returnType == PRIMITIVE_BOOLEAN
+                    }
                 }
             }
+            if (name == null) {
+                Log.i("Failed: Resolve WeType settings reader on $SETTINGS ${HostMethods.SETTING_READERS}")
+            } else {
+                Log.i("Success: Resolve WeType settings reader as $SETTINGS.$name(String, boolean)")
+            }
+            settingReaderName = name
+            settingReaderResolved = true
+            return name
         }
-        if (name == null) {
-            Log.i("Failed: Resolve WeType settings reader on $SETTINGS ${HostMethods.SETTING_READERS}")
-        } else {
-            Log.i("Success: Resolve WeType settings reader as $SETTINGS.$name(String, boolean)")
-        }
-        name
     }
 
     /** Reads one host boolean preference through [settingReader], or `null` while it is unresolved. */
     private fun readHostPreference(key: String): Any? =
-        settingReader?.let { callOnSingleton(SETTINGS, "a", it, key, false) }
+        settingReader()?.let { callOnSingleton(SETTINGS, "a", it, key, false) }
 
     /**
      * Hooks every candidate spelling of a boolean preference's `(Z)V` setter and lets the
@@ -2920,7 +2971,7 @@ internal object WeTypeLayoutHooks {
      * read and an immediate return, with no `String` comparison at all.
      */
     private fun hookGateAnchorProbe(settingsClass: Class<*>) {
-        val readerName = settingReader ?: return
+        val readerName = settingReader() ?: return
         val probe = settingsClass.declaredMethods.firstOrNull {
             it.name == readerName &&
                 it.parameterTypes.size == 2 &&

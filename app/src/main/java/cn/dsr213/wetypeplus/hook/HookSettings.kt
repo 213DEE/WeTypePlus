@@ -108,7 +108,16 @@ object HookSettings {
             "single-hand=${if (cached.unlockSingleHandMode) "on" else "off"} " +
             "(from ${source.label})"
 
-    fun prepareForHotReload() {
+    /**
+     * Forgets the values in force, so the next installation re-reads them from scratch.
+     *
+     * Called from two places that share one cause: the module is about to resolve the host's classes
+     * all over again, either because a hot reload replaced its own generation or because
+     * [ClassLoaderGuard] caught the host swapping in an RFix/Tinker class loader. Either way the
+     * cached values were read through classes that are no longer the ones the keyboard uses, so
+     * keeping them would mean acting on a stale answer.
+     */
+    fun resetGenerationState() {
         cached = KeyboardSettings.DEFAULT
         source = Source.Default
         authoritative = false

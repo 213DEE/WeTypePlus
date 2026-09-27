@@ -105,6 +105,21 @@ object Bridge {
 
     private val hooksFailed = Collections.synchronizedSet(LinkedHashSet<String>())
 
+    /**
+     * Every hook handle this generation put in place, so they can be taken back out again.
+     *
+     * Kept because of the host's hot-patch loader. WeType ships an RFix/Tinker patch that replaces
+     * its class loader part-way through start-up (`LoadedApk.mClassLoader` is swapped wholesale, see
+     * [adoptClassLoader]), and the framework hands this module its loader *before* that swap. Every
+     * hook installed against the pre-swap loader therefore sits on a class the host will never call;
+     * they are not "failed", they are inert, and the report looks perfectly healthy while nothing
+     * works. Reinstalling against the post-swap loader is the fix, and that means being able to
+     * unhook the dead ones first - otherwise the old loader (and its whole dex) is pinned for the
+     * life of the process.
+     */
+    private val hookHandles =
+        Collections.synchronizedList(mutableListOf<XposedInterface.HookHandle>())
+
     /** Keys already reported through [reportOnce]; keeps a hot-path failure to a single line. */
     private val reportedOnce = Collections.synchronizedSet(HashSet<String>())
 
@@ -204,8 +219,54 @@ object Bridge {
         synchronized(hooksInstalled) { hooksInstalled.clear() }
         synchronized(hooksFailed) { hooksFailed.clear() }
         synchronized(reportedOnce) { reportedOnce.clear() }
+        // Dropped, not unhooked: a hot reload takes the handles back itself through
+        // `onHotReloaded(oldHookHandles)`, and unhooking here would race that handover.
+        synchronized(hookHandles) { hookHandles.clear() }
         generationRetired = true
     }
+
+    /**
+     * Moves this process onto [loader], and reports whether that was a change.
+     *
+     * **When this is needed.** WeType hot-patches itself through RFix/Tinker, whose
+     * `NewClassLoaderInjector` builds a fresh `TinkerClassLoader` (parented on the old one) and
+     * swaps it into `LoadedApk.mClassLoader` during `Application#attachBaseContext`. LSPosed's
+     * `handleLoadPackage` - and therefore the class loader on `PackageReadyParam` - runs *before*
+     * that swap, so the loader recorded at install time is the **pre-patch** one.
+     * Hooking a class through it produces hooks on classes the host no longer executes: 30 hooks
+     * installed, 0 failed, and a keyboard that ignores every one of them.
+     *
+     * **Why identity and not a name.** `TinkerClassLoader extends PathClassLoader`, so every
+     * name-based check (`loader.javaClass.name`, `toString()`) answers "same loader" for both. Only
+     * `===` separates them - and on ART it has to, because one loader cannot define the same class
+     * twice, so two `Class` objects for `utils.n1` can only come from two loaders.
+     *
+     * The handles are unhooked *after* the bookkeeping is swapped, so a hook that fires during the
+     * handover cannot observe a half-updated state. A no-op when the loader is unchanged, which is
+     * what makes it safe to call from every lifecycle callback.
+     */
+    internal fun adoptClassLoader(loader: ClassLoader): Boolean {
+        val released: List<XposedInterface.HookHandle>
+        synchronized(hookHandles) {
+            if (classLoader === loader) return false
+            released = hookHandles.toList()
+            hookHandles.clear()
+            classLoader = loader
+            // The generation continues - it is the same module, only pointed at a different dex -
+            // so the audit is reset rather than retired. Without this the report would show the
+            // dead installation's 30 successes next to the live one's, and the count that matters
+            // ("did anything actually install") would be unreadable.
+            hookSequence.set(0)
+            synchronized(hooksInstalled) { hooksInstalled.clear() }
+            synchronized(hooksFailed) { hooksFailed.clear() }
+            synchronized(reportedOnce) { reportedOnce.clear() }
+        }
+        released.forEach { handle -> runCatching { handle.unhook() } }
+        return true
+    }
+
+    /** The loader the hooks currently in place were resolved against, or `null` before install. */
+    internal fun installedClassLoader(): ClassLoader? = classLoader
 
     /** Unhooks whatever the previous generation left behind. */
     fun finishHotReload(handles: List<XposedInterface.HookHandle>?) {
@@ -293,6 +354,41 @@ object Bridge {
             append(method.name)
             append(':')
             append(hookSequence.getAndIncrement())
+        }
+        target.hook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .setId(id)
+            .intercept(hooker)
+            // Kept so [adoptClassLoader] can take it back out. A handle that is never released is
+            // not harmless: it pins the class loader it was made against, and for a host-patch swap
+            // that is the entire pre-patch dex.
+            .also { handle -> synchronized(hookHandles) { hookHandles.add(handle) } }
+    }
+
+    /**
+     * Installs a hook that must **outlive** a [adoptClassLoader] swap.
+     *
+     * For framework classes only - `android.app.Application` above all. Those are defined by the
+     * boot class loader and are the same `Class` object for every loader in the process, so a hook
+     * on them stays valid when the host swaps its own loader. Host classes must go through
+     * [register] instead: those are the ones that get redefined, and a persistent hook on them would
+     * be exactly the dead hook this whole mechanism exists to avoid.
+     */
+    internal fun registerDetached(
+        method: Method,
+        kind: String,
+        hooker: XposedInterface.Hooker
+    ) {
+        val target = module ?: error(
+            "libxposed module is not attached yet; refusing to hook ${method.name}::$kind"
+        )
+        val id = buildString {
+            append("wetypeplus:")
+            append(kind)
+            append(':')
+            append(method.declaringClass.name)
+            append('#')
+            append(method.name)
         }
         target.hook(method)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -391,8 +487,18 @@ object Bridge {
      * log that contains both.
      */
     fun publishStatusAsync(trigger: String = "startup") {
+        // The payload is read *here*, not inside the thread, and that is a correctness fix rather
+        // than tidiness. The thread has to wait for the `Application` before it can build anything
+        // (see [awaitContext]), and a host-patch class loader swap landing inside that wait clears
+        // and repopulates these very sets underneath it. The report that came out then described
+        // neither installation: measured 2026-09-28, it read "20 hooks installed" on a process that
+        // had installed 30. A report is a statement about the moment it was asked for, so it is read
+        // at that moment.
+        val installed = synchronized(hooksInstalled) { hooksInstalled.toList() }
+        val failed = synchronized(hooksFailed) { hooksFailed.toList() }
+        val log = recentLogLines()
         Thread {
-            runCatching { publishStatus(trigger) }
+            runCatching { publishStatus(trigger, installed, failed, log) }
                 .onFailure { Log.i("Status report threw: ${it.message ?: it.javaClass.name}") }
         }.apply {
             name = "wetypeplus-status"
@@ -416,7 +522,12 @@ object Bridge {
      * diagnostics screen could never show anything. A silent exit is not something this function
      * is allowed to do.
      */
-    private fun publishStatus(trigger: String) {
+    private fun publishStatus(
+        trigger: String,
+        installedNow: List<String>,
+        failedNow: List<String>,
+        log: List<String>
+    ) {
         // A retired generation has no hooks of its own any more - they were unhooked on reload - so
         // its "0 hooks installed" is not a finding, it is the absence of one. Reporting it would
         // race the live generation's report into the settings app's store. See [generationRetired].
@@ -428,11 +539,6 @@ object Bridge {
             Log.i("Status report dropped in ${currentProcessName()} ($trigger): no Context")
             return
         }
-        // `Collections.synchronizedSet` guards single calls only - iterating it needs the lock
-        // held, and `toList()` iterates.
-        val installedNow = synchronized(hooksInstalled) { hooksInstalled.toList() }
-        val failedNow = synchronized(hooksFailed) { hooksFailed.toList() }
-        val log = recentLogLines()
         val report = Bundle().apply {
             putInt(SettingsBridge.KEY_WIRE_VERSION, SettingsBridge.WIRE_VERSION)
             putLong(SettingsBridge.KEY_TIMESTAMP, System.currentTimeMillis())

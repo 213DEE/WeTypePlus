@@ -104,6 +104,20 @@ internal object HostNames {
     }
 
     /**
+     * Forgets every resolved role, so the next installation validates the names against the live
+     * class loader again.
+     *
+     * Called from [WeTypeLayoutHooks.resetGenerationState], alongside the other per-installation
+     * resolutions. Belt-and-braces rather than load-bearing: what is cached here is a class *name*,
+     * and a name survives a class loader swap unharmed. What does not survive is the evidence
+     * behind it — [matches] ran against the loader that has since been superseded — and re-running
+     * it costs three `Class.forName` calls.
+     */
+    fun reset() {
+        resolved.clear()
+    }
+
+    /**
      * Identity test: does this class look like the one the role names?
      *
      * Reflection only - `Class.forName(name, false, loader)` never runs the class initialiser, which
